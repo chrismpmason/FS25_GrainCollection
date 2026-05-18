@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUI onOpen="onOpen" onClose="onClose" onCreate="onCreate">
+    <GuiElement profile="newLayer"/>
+    <Bitmap profile="dialogFullscreenBg" id="dialogBg"/>
+    <GuiElement profile="gc_bookingsDialog" id="dialogElement">
+        <ThreePartBitmap profile="fs25_dialogBgMiddle"/>
+        <ThreePartBitmap profile="fs25_dialogBgTop"/>
+        <ThreePartBitmap profile="fs25_dialogBgBottom"/>
+        <GuiElement profile="fs25_dialogContentContainer">
+            <Text profile="dialogTitle" id="dialogTitleElement"
+                  position="0px -30px" text="$l10n_ui_bookings_title"/>
+
+            <SmoothList profile="gc_bookingsList" id="bookingsList"
+                        onSelectionChanged="onBookingSelected">
+                <ListItem profile="gc_bookingsListItem">
+                    <Text profile="gc_bookingsCellTitle"    position="20px 0px"  name="title"/>
+                    <Text profile="gc_bookingsCellSubtitle" position="320px 0px" name="subtitle"/>
+                </ListItem>
+            </SmoothList>
+        </GuiElement>
+
+        <!-- Empty-state Text lives OUTSIDE the content container so its
+             anchorMiddleCenter resolves against the dialog frame itself.
+             Inside the container it gets pushed bottom-left (same class of
+             auto-layout interference the BookActionDialog hit in v0.4.2). -->
+        <Text profile="gc_emptyState" id="noBookingsText"
+              text="$l10n_ui_no_bookings"/>
+        <BoxLayout profile="fs25_dialogButtonBox">
+            <Button profile="buttonOK"   id="btnCancelBooking"
+                    text="$l10n_ui_cancel_booking"
+                    onClick="onClickCancelBooking"/>
+            <Button profile="buttonBack" id="btnClose"
+                    text="$l10n_button_back"
+                    onClick="onClickClose"/>
+        </BoxLayout>
+    </GuiElement>
+</GUI>

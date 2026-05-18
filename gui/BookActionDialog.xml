@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUI onOpen="onOpen" onClose="onClose" onCreate="onCreate">
+    <GuiElement profile="newLayer"/>
+    <Bitmap profile="dialogFullscreenBg" id="dialogBg"/>
+    <GuiElement profile="gc_bookActionDialog" id="dialogElement">
+        <ThreePartBitmap profile="fs25_dialogBgMiddle"/>
+        <ThreePartBitmap profile="fs25_dialogBgTop"/>
+        <ThreePartBitmap profile="fs25_dialogBgBottom"/>
+
+        <!-- v0.4.2: NO fs25_dialogContentContainer wrapper. Everything sits
+             directly under dialogElement so absolute positions aren't
+             nudged by the container's internal anchor logic (which in
+             v0.4.1 pushed lineContext on top of btnBookBest). -->
+
+        <Text profile="dialogTitle" id="dialogTitleElement"
+              position="0px -30px" size="720px 32px" text=""/>
+
+        <Text profile="gc_bookActionLine" id="lineContext"
+              position="40px -85px" size="640px 24px" text=""/>
+
+        <Button profile="gc_dialogButtonWide" id="btnBookNow"
+                position="40px -140px"
+                text=""
+                onClick="onClickBookNow"/>
+        <Button profile="gc_dialogButtonRecommended" id="btnBookBest"
+                position="40px -200px"
+                text=""
+                onClick="onClickBookBest"/>
+        <Button profile="gc_dialogButtonCancel" id="btnCancel"
+                position="40px -290px"
+                text=""
+                onClick="onClickCancel"/>
+    </GuiElement>
+</GUI>

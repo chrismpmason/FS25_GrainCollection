@@ -1,0 +1,25 @@
+# Build artifacts
+*.zip
+build/
+dist/
+
+# Scratch & research folders not for public release
+_scratch/
+*_RESEARCH.md
+*_DESIGN.md
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+log.txt
+# Claude Code local settings
+.claude/

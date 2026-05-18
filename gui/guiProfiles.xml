@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUIProfiles>
+    <Presets>
+        <Preset name="gc_colorListHeaderBg" value="0 0 0 0.35"/>
+        <Preset name="gc_colorWhite"        value="1 1 1 1"/>
+        <Preset name="gc_colorBookBtn"      value="0.10 0.40 0.18 0.85"/>
+        <Preset name="gc_colorBookBtnHi"    value="0.18 0.65 0.30 0.95"/>
+        <Preset name="gc_colorViewBtn"      value="0.10 0.25 0.45 0.85"/>
+        <Preset name="gc_colorViewBtnHi"    value="0.18 0.42 0.70 0.95"/>
+    </Presets>
+
+    <!-- ===== Main tab: header row ===== -->
+    <Profile name="gc_headerRow" extends="baseReference">
+        <size value="155px 32px"/>
+        <imageColor value="0 0 0 0"/>
+        <textFocusedColor value="$preset_fs25_colorMainHighlight"/>
+        <textHighlightedColor value="$preset_fs25_colorMainHighlight"/>
+        <textSize value="16px"/>
+        <textBold value="true"/>
+        <textUpperCase value="true"/>
+        <textColor value="$preset_colorWhite_50"/>
+        <textAlignment value="left"/>
+        <textDisabledColor value="$preset_colorDisabled"/>
+    </Profile>
+    <Profile name="gc_headerRowRight" extends="gc_headerRow">
+        <textAlignment value="right"/>
+    </Profile>
+
+    <!-- ===== Main tab: list ===== -->
+    <Profile name="gc_list" extends="emptyPanel" with="anchorStretchingYLeft pivotTopLeft">
+        <position value="0px -40px"/>
+        <absoluteSizeOffset value="0px 80px"/>
+    </Profile>
+    <Profile name="gc_listItem" extends="baseReference" with="anchorTopStretchingX alternating">
+        <height value="32px"/>
+        <imageColor value="$preset_fs25_colorGrey"/>
+        <imageSelectedColor value="$preset_fs25_colorMainHighlight"/>
+        <alternateBackgroundColor value="$preset_fs25_colorGreyDark_50"/>
+    </Profile>
+
+    <!-- ===== Row cells ===== -->
+    <Profile name="gc_cellIcon" extends="baseReference" with="anchorMiddleLeft">
+        <size value="24px 24px"/>
+        <position value="8px 0"/>
+        <imageSliceId value="noSlice"/>
+    </Profile>
+    <Profile name="gc_cellLeftBright" extends="baseReference" with="anchorStretchingYLeft">
+        <size value="200px 32px"/>
+        <textBold value="true"/>
+        <textSize value="15px"/>
+        <textAlignment value="left"/>
+        <textColor value="$preset_fs25_colorMainLight"/>
+        <textSelectedColor value="$preset_fs25_colorMainDark"/>
+    </Profile>
+    <Profile name="gc_cellLeft" extends="gc_cellLeftBright">
+        <textBold value="false"/>
+    </Profile>
+    <Profile name="gc_cellRight" extends="gc_cellLeft">
+        <textAlignment value="right"/>
+    </Profile>
+    <Profile name="gc_cellBuyer" extends="gc_cellLeft">
+        <size value="230px 32px"/>
+        <textAutoWidth value="true"/>
+        <textMaxWidth value="230px"/>
+        <textLayoutMode value="scrolling"/>
+    </Profile>
+
+    <!-- Trend arrow: profile-swap on populate (idle/climbing/falling/great). -->
+    <Profile name="gc_trendArrow" extends="baseReference" with="anchorMiddleLeft">
+        <size value="18px 18px"/>
+        <imageSliceId value="gui.priceTrend"/>
+        <imageColor value="$preset_colorTransparent"/>
+    </Profile>
+    <Profile name="gc_trendClimbing" extends="gc_trendArrow">
+        <imageColor value="$preset_colorGreen"/>
+        <imageRotation value="0"/>
+    </Profile>
+    <Profile name="gc_trendFalling" extends="gc_trendArrow">
+        <imageColor value="$preset_colorRed"/>
+        <imageInvertY value="true"/>
+    </Profile>
+    <Profile name="gc_trendGreatDemand" extends="gc_trendArrow">
+        <imageColor value="$preset_colorBlue"/>
+        <imageSelectedColor value="$preset_colorWhite"/>
+        <imageRotation value="90"/>
+    </Profile>
+
+    <!-- BOOK button — clickable Bitmap inside the row. -->
+    <Profile name="gc_bookButton" extends="baseReference" with="anchorMiddleLeft">
+        <size value="120px 28px"/>
+        <imageColor value="$preset_gc_colorBookBtn"/>
+        <imageFocusedColor value="$preset_gc_colorBookBtnHi"/>
+        <imageHighlightedColor value="$preset_gc_colorBookBtnHi"/>
+        <imageSelectedColor value="$preset_gc_colorBookBtnHi"/>
+    </Profile>
+    <Profile name="gc_bookButtonLabel" extends="baseReference" with="anchorMiddleCenter">
+        <size value="120px 28px"/>
+        <textSize value="15px"/>
+        <textBold value="true"/>
+        <textAlignment value="center"/>
+        <textColor value="$preset_gc_colorWhite"/>
+    </Profile>
+
+    <!-- "View Bookings (N)" header button.
+         v0.4.0: Bitmap-with-onClick anchored middle-left, off the menu's
+                 left edge into the sidebar.
+         v0.4.1: Button anchored top-right of the menuContainer at Y=-100px,
+                 which put it below the header panel — fine with 2 rows,
+                 overlapped row 3+'s BOOK column with 4+ rows.
+         v0.4.4: Lives INSIDE fs25_menuHeaderPanel, anchored middle-right of
+                 the header itself with X offset to clear the BALANCE pill.
+                 Never collides with table rows regardless of row count. -->
+    <Profile name="gc_viewBookingsButton" extends="baseReference" with="anchorMiddleRight pivotMiddleRight">
+        <position value="-310px 0px"/>
+        <size value="220px 40px"/>
+        <imageColor value="$preset_gc_colorViewBtn"/>
+        <imageFocusedColor value="$preset_gc_colorViewBtnHi"/>
+        <imageHighlightedColor value="$preset_gc_colorViewBtnHi"/>
+        <imageSelectedColor value="$preset_gc_colorViewBtnHi"/>
+        <textSize value="16px"/>
+        <textBold value="true"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+        <textColor value="$preset_gc_colorWhite"/>
+        <textFocusedColor value="$preset_gc_colorWhite"/>
+        <textHighlightedColor value="$preset_gc_colorWhite"/>
+    </Profile>
+
+    <!-- Slider docked right of the list. -->
+    <Profile name="gc_sliderBox" extends="fs25_listSliderBox" with="anchorTopStretchingX pivotTopRight">
+        <position value="28px -40px"/>
+        <absoluteSizeOffset value="0px 80px"/>
+    </Profile>
+
+    <!-- Footer (totals row). -->
+    <Profile name="gc_footer" extends="baseReference" with="anchorBottomStretchingX">
+        <size value="100% 50px"/>
+    </Profile>
+
+    <!-- ===== Book-action dialog =====
+         v0.4.2: dialog tall enough to fit title + context + 3 stacked
+         buttons without the fs25_dialogContentContainer wrapper, which was
+         repositioning the context Text on top of the BOOK BEST button. -->
+    <Profile name="gc_bookActionDialog" extends="fs25_dialogBg">
+        <size value="720px 400px"/>
+    </Profile>
+    <Profile name="gc_bookActionTitle" extends="baseReference" with="anchorTopCenter">
+        <textSize value="24px"/>
+        <textBold value="true"/>
+        <textColor value="$preset_gc_colorWhite"/>
+        <textAlignment value="center"/>
+    </Profile>
+    <Profile name="gc_bookActionLine" extends="baseReference" with="anchorTopLeft pivotTopLeft">
+        <textSize value="16px"/>
+        <textColor value="0.85 0.85 0.85 1"/>
+        <textAlignment value="left"/>
+        <textVerticalAlignment value="top"/>
+    </Profile>
+
+    <!-- Three vertically stacked custom dialog buttons. NOT extending
+         buttonOK / buttonBack: those profiles embed keyboard-hint icons
+         (↩ / ESC) inside the label, which splits long descriptive text
+         across two lines. We bake in our own visuals here and rely on
+         MessageDialog's native ESC handling. -->
+    <Profile name="gc_dialogButtonWide" extends="baseReference" with="anchorTopLeft">
+        <size value="640px 44px"/>
+        <imageColor value="0.18 0.30 0.18 0.85"/>
+        <imageFocusedColor value="0.28 0.55 0.30 0.95"/>
+        <imageHighlightedColor value="0.28 0.55 0.30 0.95"/>
+        <imageSelectedColor value="0.28 0.55 0.30 0.95"/>
+        <textSize value="17px"/>
+        <textBold value="true"/>
+        <textUpperCase value="false"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+        <textColor value="$preset_gc_colorWhite"/>
+        <textFocusedColor value="$preset_gc_colorWhite"/>
+        <textHighlightedColor value="$preset_gc_colorWhite"/>
+    </Profile>
+    <Profile name="gc_dialogButtonRecommended" extends="gc_dialogButtonWide">
+        <imageColor value="0.10 0.45 0.22 0.92"/>
+        <imageFocusedColor value="0.22 0.65 0.35 0.98"/>
+        <imageHighlightedColor value="0.22 0.65 0.35 0.98"/>
+        <imageSelectedColor value="0.22 0.65 0.35 0.98"/>
+    </Profile>
+    <Profile name="gc_dialogButtonCancel" extends="gc_dialogButtonWide">
+        <imageColor value="0.30 0.30 0.30 0.85"/>
+        <imageFocusedColor value="0.45 0.45 0.45 0.95"/>
+        <imageHighlightedColor value="0.45 0.45 0.45 0.95"/>
+        <imageSelectedColor value="0.45 0.45 0.45 0.95"/>
+    </Profile>
+
+    <!-- v0.4.3: empty-state text centered in the modal body. The vanilla
+         ingameMenuNoContentText profile anchors bottom-left in this
+         context and overlapped the button strip. -->
+    <Profile name="gc_emptyState" extends="baseReference" with="anchorMiddleCenter pivotMiddleCenter">
+        <position value="0px 0px"/>
+        <size value="700px 40px"/>
+        <textSize value="20px"/>
+        <textBold value="true"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+        <textColor value="0.75 0.75 0.75 1"/>
+    </Profile>
+
+    <!-- ===== Bookings list dialog =====
+         v0.4.2: widened dialog 780 -> 900 and subtitle column 440 -> 560
+         so right-aligned prices like "~£12,345" never truncate. -->
+    <Profile name="gc_bookingsDialog" extends="fs25_dialogBg">
+        <size value="920px 600px"/>
+    </Profile>
+    <Profile name="gc_bookingsList" extends="emptyPanel" with="anchorStretchingYLeft pivotTopLeft">
+        <position value="20px -100px"/>
+        <size value="880px 420px"/>
+    </Profile>
+    <Profile name="gc_bookingsListItem" extends="gc_listItem">
+        <height value="40px"/>
+    </Profile>
+    <Profile name="gc_bookingsCellTitle" extends="gc_cellLeftBright">
+        <size value="300px 40px"/>
+    </Profile>
+    <Profile name="gc_bookingsCellSubtitle" extends="gc_cellLeft">
+        <size value="560px 40px"/>
+        <textAlignment value="right"/>
+    </Profile>
+</GUIProfiles>
