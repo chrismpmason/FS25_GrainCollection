@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<l10n>
+    <texts>
+        <!-- Mod metadata. ui_balance, button_back, ui_total are provided
+             by vanilla FS25 i18n; defining them here causes a duplicate
+             warning at load. XML references like $l10n_ui_balance fall
+             back to the vanilla translation. -->
+        <text name="ui_title"             text="Produce Collection"/>
+        <text name="action_open_menu"     text="Produce Collection"/>
+        <text name="input_GRAINCOLLECTION_TOGGLE_MENU" text="Produce Collection"/>
+
+        <!-- Main table column headers -->
+        <text name="ui_col_grain"     text="Grain"/>
+        <text name="ui_col_volume"    text="Volume"/>
+        <text name="ui_col_current"   text="£/L"/>
+        <text name="ui_col_value"     text="Value"/>
+        <text name="ui_col_buyer"     text="Best Buyer"/>
+        <text name="ui_col_maxprice"  text="Max £/L"/>
+        <text name="ui_col_maxvalue"  text="Max Value"/>
+        <text name="ui_col_bestmonth" text="Best Month"/>
+
+        <!-- Buttons -->
+        <text name="ui_book"             text="BOOK"/>
+        <text name="ui_view_bookings"    text="View Bookings"/>
+        <text name="ui_view_bookings_n"  text="View Bookings (%d)"/>
+        <text name="ui_cancel"           text="Cancel"/>
+        <text name="ui_cancel_booking"   text="Cancel Selected"/>
+        <text name="ui_no_sellpoint"     text="No buyer"/>
+
+        <!-- Book action dialog -->
+        <text name="ui_book_dialog_title"   text="Book %s collection"/>
+        <text name="ui_book_dialog_context" text="%s across %d silo(s)  ·  Best buyer: %s @ £%.2f/L"/>
+        <text name="ui_book_now_fmt"        text="BOOK NOW — collected this month, ~%s"/>
+        <text name="ui_book_best_fmt"       text="BOOK BEST — %s, ~%s   [RECOMMENDED]"/>
+
+        <!-- Bookings dialog -->
+        <text name="ui_bookings_title" text="Pending bookings"/>
+        <text name="ui_no_bookings"    text="No pending bookings."/>
+
+        <!-- Notifications -->
+        <text name="notify_booked"    text="Booked: %s for collection in %s. Estimated payout: %s (final price set on collection day)."/>
+        <text name="notify_banner"    text="Collection complete: %s %s sold for %s"/>
+        <text name="notify_cancelled" text="Booking cancelled."/>
+    </texts>
+</l10n>

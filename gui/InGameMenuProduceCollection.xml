@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUI name="InGameMenuProduceCollection">
+    <GuiElement profile="fs25_menuContainer">
+
+        <GuiElement profile="fs25_menuHeaderPanel">
+            <Text profile="fs25_menuHeaderTitle" id="categoryHeaderText"
+                  text="$l10n_ui_title"/>
+            <RoundCorner profile="fs25_shopMoneyBoxBg" id="shopMoneyBoxBg"/>
+            <BoxLayout profile="fs25_shopMoneyBox" id="shopMoneyBox">
+                <Text profile="fs25_shopBalance" text="$l10n_ui_balance:"/>
+                <Text profile="fs25_shopMoney" id="currentBalanceText"/>
+            </BoxLayout>
+            <!-- v0.4.4: lives inside the header panel, anchored middle-right
+                 with X offset to clear the BALANCE pill. Previously a sibling
+                 of the header which placed it at Y=-100 (over table rows). -->
+            <Button profile="gc_viewBookingsButton" id="viewBookingsButton"
+                    text="$l10n_ui_view_bookings"
+                    onClick="onClickViewBookings"/>
+        </GuiElement>
+
+        <!-- Sortable column headers. Sort-indicator Bitmaps default to
+             visible="false"; the controller shows the one matching the
+             current sortKey/sortAsc on frame open + on each toggleSort. -->
+        <GuiElement profile="fs25_statisticsHeaderBox">
+            <Button profile="gc_headerRow"      position="40px 0px"   size="200px 32px"
+                    text="$l10n_ui_col_grain"      onClick="onClickGrainHeader">
+                <Bitmap profile="fs25_vehiclesHeaderIconSortAscending"  position="120px 0px" id="iconGrainAscending"  visible="false"/>
+                <Bitmap profile="fs25_vehiclesHeaderIconSortDescending" position="120px 0px" id="iconGrainDescending" visible="false"/>
+            </Button>
+            <Button profile="gc_headerRowRight" position="240px 0px"  size="130px 32px"
+                    text="$l10n_ui_col_volume"     handleFocus="false"/>
+            <Button profile="gc_headerRowRight" position="370px 0px"  size="110px 32px"
+                    text="$l10n_ui_col_current"    handleFocus="false"/>
+            <Button profile="gc_headerRowRight" position="500px 0px"  size="150px 32px"
+                    text="$l10n_ui_col_value"      onClick="onClickValueHeader">
+                <Bitmap profile="fs25_vehiclesHeaderIconSortAscending"  position="-22px 0px" id="iconValueAscending"  visible="false"/>
+                <Bitmap profile="fs25_vehiclesHeaderIconSortDescending" position="-22px 0px" id="iconValueDescending" visible="false"/>
+            </Button>
+            <Button profile="gc_headerRow"      position="660px 0px"  size="230px 32px"
+                    text="$l10n_ui_col_buyer"      handleFocus="false"/>
+            <Button profile="gc_headerRowRight" position="890px 0px"  size="110px 32px"
+                    text="$l10n_ui_col_maxprice"   handleFocus="false"/>
+            <Button profile="gc_headerRowRight" position="1000px 0px" size="150px 32px"
+                    text="$l10n_ui_col_maxvalue"   onClick="onClickMaxValueHeader">
+                <Bitmap profile="fs25_vehiclesHeaderIconSortAscending"  position="-22px 0px" id="iconMaxValueAscending"  visible="false"/>
+                <Bitmap profile="fs25_vehiclesHeaderIconSortDescending" position="-22px 0px" id="iconMaxValueDescending" visible="false"/>
+            </Button>
+            <Button profile="gc_headerRow"      position="1180px 0px" size="110px 32px"
+                    text="$l10n_ui_col_bestmonth"  onClick="onClickBestMonthHeader">
+                <Bitmap profile="fs25_vehiclesHeaderIconSortAscending"  position="92px 0px" id="iconBestMonthAscending"  visible="false"/>
+                <Bitmap profile="fs25_vehiclesHeaderIconSortDescending" position="92px 0px" id="iconBestMonthDescending" visible="false"/>
+            </Button>
+            <Button profile="gc_headerRow"      position="1300px 0px" size="120px 32px"
+                    text=""                        handleFocus="false"/>
+            <ThreePartBitmap profile="fs25_lineSeparatorBottom" position="0px -2dp"/>
+        </GuiElement>
+
+        <!-- onClick fires onListItemClicked(list, section, index) on the
+             controller when a row is clicked. SmoothList consumes clicks at
+             the row level — in-row Bitmaps with onClick do NOT fire (that
+             was the v0.4.0 BOOK button bug). The whole row is the trigger;
+             the gc_bookButton bitmap remains as a visual affordance only. -->
+        <SmoothList profile="gc_list" id="stockTable"
+                    onClick="onListItemClicked"
+                    onSelectionChanged="onListSelectionChanged">
+            <ListItem profile="gc_listItem">
+                <Bitmap profile="gc_cellIcon"        name="icon"/>
+                <Text   profile="gc_cellLeftBright"  position="40px 0px"   name="grain"/>
+                <Text   profile="gc_cellRight"       position="240px 0px"  size="130px 32px" name="volume"/>
+                <Text   profile="gc_cellRight"       position="370px 0px"  size="110px 32px" name="currentPrice"/>
+                <Bitmap profile="gc_trendArrow"      position="480px 0px"  name="trend"/>
+                <Text   profile="gc_cellRight"       position="500px 0px"  size="150px 32px" name="currentValue"/>
+                <Text   profile="gc_cellBuyer"       position="660px 0px"  name="buyer"/>
+                <Text   profile="gc_cellRight"       position="890px 0px"  size="110px 32px" name="maxPrice"/>
+                <Text   profile="gc_cellRight"       position="1000px 0px" size="150px 32px" name="maxValue"/>
+                <Text   profile="gc_cellLeft"        position="1180px 0px" size="110px 32px" name="bestMonth"/>
+                <Bitmap profile="gc_bookButton"      position="1300px 2px" name="bookBtn">
+                    <Text profile="gc_bookButtonLabel" name="bookLabel" text="$l10n_ui_book"/>
+                </Bitmap>
+            </ListItem>
+        </SmoothList>
+
+        <ThreePartBitmap profile="gc_sliderBox">
+            <Slider profile="fs25_listSlider" dataElementId="stockTable"/>
+        </ThreePartBitmap>
+
+        <GuiElement profile="gc_footer">
+            <ThreePartBitmap profile="fs25_lineSeparatorTop" position="0px -15dp"/>
+            <Text profile="gc_headerRow"      position="40px 0px"   text="$l10n_ui_total"/>
+            <Text profile="gc_headerRowRight" position="240px 0px"  size="130px 32px" id="totalVolume"/>
+            <Text profile="gc_headerRowRight" position="500px 0px"  size="150px 32px" id="totalCurrentValue"/>
+            <Text profile="gc_headerRowRight" position="1000px 0px" size="150px 32px" id="totalMaxValue"/>
+        </GuiElement>
+
+    </GuiElement>
+</GUI>
