@@ -20,6 +20,17 @@ No more manually checking buyer prices and driving back and forth to compare. Se
 3. Enable the mod in your save's mod list
 4. Press **F7** in-game to open the Produce Collection menu (or find it in the in-game menu sidebar)
 
+### Merchant arrival marker placement
+
+When you set the merchant arrival point (via the picker in Produce Collection), pick a spot with enough open space for the merchant vehicle to spawn cleanly. The default vehicle is a Volvo FH16 + Krampe SKS 30/1050 trailer combo — roughly 18 metres long.
+
+Open fields, road junctions, and the entrance to your farm yard work well. Avoid:
+- Inside tight farm buildings or barns
+- Between hedges, fences, or close-packed structures
+- The exact load bay of a buyer (those are usually too tight for a full combo)
+
+If the truck gets stuck during a journey, that's an AutoDrive routing issue — adjust your AutoDrive waypoints so the route works for an 18m vehicle. The mod just hands AutoDrive your spawn marker and destination marker; AutoDrive does the actual driving.
+
 ## Compatibility
 
 - FS25 (base game)
