@@ -33,7 +33,8 @@ $includePaths = @(
     'icon_grainCollection.png',
     'scripts',
     'i18n',
-    'gui'
+    'gui',
+    'vehicles'
 )
 
 # Collect (entryName, sourcePath) pairs, recursing into folders.

@@ -11,7 +11,7 @@
                   position="0px -30px" text="$l10n_ui_bookings_title"/>
 
             <SmoothList profile="gc_bookingsList" id="bookingsList"
-                        onSelectionChanged="onBookingSelected">
+                        onSelectionChanged="onListSelectionChanged">
                 <ListItem profile="gc_bookingsListItem">
                     <Text profile="gc_bookingsCellTitle"    position="20px 0px"  name="title"/>
                     <Text profile="gc_bookingsCellSubtitle" position="320px 0px" name="subtitle"/>

@@ -39,6 +39,15 @@ GrainCollection.AD            = nil
 GrainCollection.ADGraph       = nil
 GrainCollection.adAvailable   = false
 GrainCollection.lastUsedTruck = {}    -- [farmId] = objectId, for default selection
+-- v0.5.99.30: player-set merchant-truck pickup location, per farm.
+-- [farmId] = { x, z, dirX, dirZ }. Set via the Set Pickup hotkey;
+-- persisted in the savegame XML alongside bookings.
+GrainCollection.pickupLocations = {}
+
+-- v0.6: per-farm merchant arrival marker. [farmId] = AutoDrive marker id.
+-- The merchant truck spawns at + returns to this AutoDrive marker. Chosen
+-- by the player from the marker-picker dialog; persisted in the savegame.
+GrainCollection.merchantMarkers = {}
 
 -- v0.4.1: consistent uppercase-L volume formatting. FS25's formatVolume
 -- varies between 'l' and 'L' depending on overload; we sidestep it.
@@ -1272,6 +1281,35 @@ function GrainCollection.onSave()
     GrainCollection:saveToXML()
 end
 
+-- v0.5.99.30: store the merchant-truck pickup location for a farm and
+-- persist it immediately (same pattern bookCollection uses).
+function GrainCollection:setPickupLocation(farmId, x, z, dirX, dirZ)
+    if farmId == nil then return end
+    GrainCollection.pickupLocations[farmId] = { x = x, z = z, dirX = dirX, dirZ = dirZ }
+    self:saveToXML()
+    print(("[%s] pickup location set for farm %s: (%.1f, %.1f) dir=(%.2f, %.2f)"):format(
+        GrainCollection.MOD_NAME, tostring(farmId), x, z, dirX, dirZ))
+end
+
+-- Returns { x, z, dirX, dirZ } for the farm, or nil if none set.
+function GrainCollection:getPickupLocation(farmId)
+    return GrainCollection.pickupLocations[farmId]
+end
+
+-- v0.6: per-farm merchant arrival marker (an AutoDrive marker id).
+function GrainCollection:setMerchantMarker(farmId, markerId)
+    if farmId == nil then return end
+    GrainCollection.merchantMarkers[farmId] = markerId
+    self:saveToXML()
+    print(("[%s] merchant arrival marker for farm %s set to AD marker id %s"):format(
+        GrainCollection.MOD_NAME, tostring(farmId), tostring(markerId)))
+end
+
+-- Returns the AutoDrive marker id for the farm, or nil if none chosen.
+function GrainCollection:getMerchantMarker(farmId)
+    return GrainCollection.merchantMarkers[farmId]
+end
+
 function GrainCollection:getSaveXMLPath()
     if g_currentMission.missionInfo == nil then return nil end
     local savegameDir = g_currentMission.missionInfo.savegameDirectory
@@ -1297,6 +1335,27 @@ function GrainCollection:saveToXML()
         setXMLFloat(xml,  key .. "#totalNet",             b.totalNet)
         setXMLString(xml, key .. "#unloadingStationName", b.unloadingStationName or "")
         setXMLString(xml, key .. "#targetMonthLabel",     b.targetMonthLabel or "")
+    end
+
+    -- v0.5.99.30: per-farm merchant-truck pickup locations.
+    local pi = 0
+    for farmId, p in pairs(GrainCollection.pickupLocations or {}) do
+        local key = string.format("grainCollection.pickupLocation(%d)", pi)
+        setXMLInt(xml,   key .. "#farmId", farmId)
+        setXMLFloat(xml, key .. "#x",      p.x    or 0)
+        setXMLFloat(xml, key .. "#z",      p.z    or 0)
+        setXMLFloat(xml, key .. "#dirX",   p.dirX or 0)
+        setXMLFloat(xml, key .. "#dirZ",   p.dirZ or 1)
+        pi = pi + 1
+    end
+
+    -- v0.6: per-farm merchant arrival markers (AutoDrive marker ids).
+    local mi = 0
+    for farmId, markerId in pairs(GrainCollection.merchantMarkers or {}) do
+        local key = string.format("grainCollection.merchantMarker(%d)", mi)
+        setXMLInt(xml, key .. "#farmId",   farmId)
+        setXMLInt(xml, key .. "#markerId", markerId)
+        mi = mi + 1
     end
 
     saveXMLFile(xml)
@@ -1328,6 +1387,38 @@ function GrainCollection:loadFromXML()
             targetMonthLabel     = getXMLString(xml, key .. "#targetMonthLabel") or "",
         })
         i = i + 1
+    end
+
+    -- v0.5.99.30: per-farm merchant-truck pickup locations.
+    GrainCollection.pickupLocations = {}
+    local pi = 0
+    while true do
+        local key = string.format("grainCollection.pickupLocation(%d)", pi)
+        if not hasXMLProperty(xml, key) then break end
+        local farmId = getXMLInt(xml, key .. "#farmId")
+        if farmId ~= nil then
+            GrainCollection.pickupLocations[farmId] = {
+                x    = getXMLFloat(xml, key .. "#x")    or 0,
+                z    = getXMLFloat(xml, key .. "#z")    or 0,
+                dirX = getXMLFloat(xml, key .. "#dirX") or 0,
+                dirZ = getXMLFloat(xml, key .. "#dirZ") or 1,
+            }
+        end
+        pi = pi + 1
+    end
+
+    -- v0.6: per-farm merchant arrival markers.
+    GrainCollection.merchantMarkers = {}
+    local mi = 0
+    while true do
+        local key = string.format("grainCollection.merchantMarker(%d)", mi)
+        if not hasXMLProperty(xml, key) then break end
+        local farmId   = getXMLInt(xml, key .. "#farmId")
+        local markerId = getXMLInt(xml, key .. "#markerId")
+        if farmId ~= nil and markerId ~= nil then
+            GrainCollection.merchantMarkers[farmId] = markerId
+        end
+        mi = mi + 1
     end
 
     delete(xml)
