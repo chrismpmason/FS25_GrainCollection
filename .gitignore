@@ -3,22 +3,33 @@
 build/
 dist/
 
-# Scratch & research folders not for public release
+# Internal planning, research, diagnosis, audit docs — stay local, never push
 _scratch/
+v0.5_*.md
+v0.6_*.md
 *_RESEARCH.md
 *_DESIGN.md
+CHANGELOG.md
+ROADMAP.md
+dev_notes.md
+
+# ModHub portal artifacts — for the ModHub upload, not the GitHub repo
+MODHUB_DESCRIPTION.txt
+MODHUB_CHECKLIST.md
+
+# Editor settings
+.vscode/
+.idea/
 
 # OS junk
 Thumbs.db
 .DS_Store
+desktop.ini
 
-# Editor junk
-.vscode/
-.idea/
-*.swp
-*~
-
-# Logs
+# Logs and swap files
 *.log
 log.txt
-
+*.swp
+*~
+*.bak
+*.tmp

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<!--
+    v0.6 buyer-haulier merchant vehicle.
+    A bundle store item pairing the vanilla Volvo FH16 semi tractor with
+    the vanilla Krampe SKS 30/1050 bulk semitrailer (~59,400 L grain).
+    VehicleLoadingData:setStoreItem sees the <bundleElements> + <attacherInfo>
+    and spawns BOTH vehicles already attached — see v0.6_FH16_KRAMPE_SWAP.md.
+-->
+<vehicle xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="$data/shared/xml/schema/vehicle.xsd">
+    <storeData>
+        <name>Grain Haulier (FH16 + SKS 30/1050)</name>
+        <specs>
+            <combination filterCategory="trucks"/>
+        </specs>
+        <functions>
+            <function>$l10n_function_semiTrailer</function>
+        </functions>
+        <image>$data/vehicles/volvo/fh16/store_fh16.dds</image>
+        <bundleElements>
+            <bundleElement>
+                <xmlFilename>$data/vehicles/volvo/fh16/fh16.xml</xmlFilename>
+                <offset>0 0 0</offset>
+                <rotationOffset>0 0 0</rotationOffset>
+            </bundleElement>
+            <bundleElement>
+                <xmlFilename>$data/vehicles/krampe/sks30_150/sks30_150.xml</xmlFilename>
+                <offset>0 0 -10</offset>
+                <rotationOffset>0 0 0</rotationOffset>
+            </bundleElement>
+        </bundleElements>
+        <attacherInfo>
+            <attach bundleElement0="1" bundleElement1="2" attacherJointIndex="1" inputAttacherJointIndex="1"/>
+        </attacherInfo>
+        <brand>VOLVO</brand>
+        <rotation>0</rotation>
+        <category>trucks</category>
+    </storeData>
+</vehicle>

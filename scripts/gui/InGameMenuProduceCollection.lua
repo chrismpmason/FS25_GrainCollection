@@ -181,10 +181,27 @@ function InGameMenuProduceCollection:updateFooter()
     if self.totalMaxValue     ~= nil then self.totalMaxValue:setText(g_i18n:formatMoney(totalMax, 0, true, true)) end
 end
 
+-- v0.6: the former "View Bookings" button is repurposed as the merchant
+-- arrival point indicator + picker entry. Its label shows the farm's
+-- currently chosen AutoDrive marker (or "not set").
 function InGameMenuProduceCollection:updateViewBookingsLabel()
     if self.viewBookingsButton == nil then return end
-    local n = (GrainCollection.bookings and #GrainCollection.bookings) or 0
-    self.viewBookingsButton:setText(string.format(g_i18n:getText("ui_view_bookings_n"), n))
+    local farmId = (g_currentMission and g_currentMission.getFarmId)
+        and g_currentMission:getFarmId() or 1
+    local name = "not set"
+    if GrainCollection.getMerchantMarker ~= nil then
+        local id = GrainCollection:getMerchantMarker(farmId)
+        if id ~= nil then
+            name = "id " .. tostring(id)
+            local ok, markers = pcall(GrainCollection.listADMarkers, GrainCollection)
+            if ok and markers ~= nil then
+                for _, m in ipairs(markers) do
+                    if m.id == id then name = m.name or name break end
+                end
+            end
+        end
+    end
+    self.viewBookingsButton:setText("Merchant point: " .. name)
 end
 
 -- ============================================================
@@ -265,6 +282,14 @@ function InGameMenuProduceCollection:populateCellForItemInSection(list, section,
         else
             cell:getAttribute("buyer"):setText(g_i18n:getText("ui_no_sellpoint"))
         end
+        -- v0.6: in-progress indicator. While the merchant haulier is
+        -- collecting this grain, the row shows it (refreshed on menu
+        -- open / reload — not a live per-frame update).
+        if DispatchSmokeTest ~= nil and DispatchSmokeTest.tripState ~= nil
+                and DispatchSmokeTest.tripState ~= "idle"
+                and DispatchSmokeTest.collectionFillType == row.fillTypeIndex then
+            cell:getAttribute("buyer"):setText("Merchant en route...")
+        end
     end
     if cell:getAttribute("maxPrice") ~= nil then
         cell:getAttribute("maxPrice"):setText(
@@ -282,6 +307,7 @@ function InGameMenuProduceCollection:populateCellForItemInSection(list, section,
             cell:getAttribute("bestMonth").textColor = InGameMenuProduceCollection.priceColours.normal[cb]
         end
     end
+
 end
 
 -- ============================================================
@@ -294,10 +320,11 @@ function InGameMenuProduceCollection:onListSelectionChanged(list, section, index
     self.selectedIndex = index
 end
 
--- Row click → opens BookActionDialog for that row. Hooked via the SmoothList
--- onClick="onListItemClicked" attribute in the XML. In-row Bitmap onClicks
--- do NOT fire (SmoothList consumes the click at row level), so the whole
--- row is the click target; the gc_bookButton Bitmap is now visual only.
+-- Row click → dispatches the AutoDrive merchant haulier (v0.6). Hooked via
+-- the SmoothList onClick="onListItemClicked" attribute in the XML. In-row
+-- Bitmap onClicks do NOT fire (SmoothList consumes the click at row
+-- level), so the whole row is the click target; the gc_bookButton Bitmap
+-- is a visual affordance only.
 function InGameMenuProduceCollection:onListItemClicked(list, section, index)
     GrainCollection.dbg(("onListItemClicked FIRED: section=%s index=%s rows=%d"):format(
         tostring(section), tostring(index), #self.rows))
@@ -320,24 +347,55 @@ function InGameMenuProduceCollection:onListItemClicked(list, section, index)
         return
     end
 
-    if GrainCollection.bookActionDialog == nil then
-        print(("[%s] ERROR: bookActionDialog not registered (registerGui never ran?)"):format(
+    -- v0.6: BOOK now dispatches the AutoDrive merchant haulier for this
+    -- row's grain — the FH16 + Krampe combo drives buyer -> silo -> buyer.
+    -- The seasonal BookActionDialog flow is superseded (its code remains
+    -- but is no longer reached). Feature-detect the haulier entry point:
+    -- if the module is absent or its API changed in a future FS25 build,
+    -- log a warning and skip rather than crash.
+    if DispatchSmokeTest == nil
+            or type(DispatchSmokeTest.startCollectionFromMenu) ~= "function" then
+        print(("[%s] ERROR: DispatchSmokeTest.startCollectionFromMenu unavailable — cannot dispatch"):format(
             GrainCollection.MOD_NAME))
+        if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil then
+            g_currentMission:addIngameNotification(
+                FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
+                "Merchant haulier unavailable")
+        end
         return
     end
 
-    local dialog = g_gui:showDialog("BookActionDialog")
-    if dialog == nil then
-        print(("[%s] ERROR: showDialog('BookActionDialog') returned nil"):format(
-            GrainCollection.MOD_NAME))
+    local pok, success, message, needsPicker = pcall(
+        DispatchSmokeTest.startCollectionFromMenu, DispatchSmokeTest, row)
+    if not pok then
+        print(("[%s] startCollectionFromMenu threw: %s"):format(
+            GrainCollection.MOD_NAME, tostring(success)))
+        success, message, needsPicker = false, "Collection dispatch failed (internal error)", false
+    end
+    GrainCollection.dbg(("BOOK dispatch: success=%s message=%s needsPicker=%s"):format(
+        tostring(success), tostring(message), tostring(needsPicker)))
+
+    -- v0.6: no merchant arrival point set yet → open the picker dialog
+    -- so the player can choose one, then click BOOK again.
+    if needsPicker then
+        if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil then
+            g_currentMission:addIngameNotification(
+                FSBaseMission.INGAME_NOTIFICATION_INFO,
+                "Choose a merchant arrival point, then click BOOK again")
+        end
+        self:openMerchantMarkerPicker()
         return
     end
 
-    if dialog.target ~= nil and dialog.target.setBookData ~= nil then
-        dialog.target:setBookData(row, function(result)
-            GrainCollection.dbg(("BookActionDialog callback: result=%s"):format(tostring(result)))
-            self:onBookConfirmed(row, result)
-        end)
+    if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil
+            and message ~= nil then
+        g_currentMission:addIngameNotification(
+            success and FSBaseMission.INGAME_NOTIFICATION_INFO
+                or FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
+            tostring(message))
+    end
+    if success then
+        self:reloadFromBackend()
     end
 end
 
@@ -374,17 +432,41 @@ function InGameMenuProduceCollection:onBookConfirmed(row, choice)
     end
 end
 
+-- v0.6: the "Merchant point" button opens the marker picker so the
+-- player can set / change the merchant arrival point at any time.
+-- (XML still binds onClick="onClickViewBookings" — name kept for churn.)
 function InGameMenuProduceCollection:onClickViewBookings(button)
-    if GrainCollection.bookingsDialog == nil then
-        print(("[%s] ERROR: bookingsDialog not registered"):format(GrainCollection.MOD_NAME))
-        return
+    self:openMerchantMarkerPicker()
+end
+
+-- Open the merchant-arrival-point picker (the repurposed
+-- ProduceBookingsDialog). pcall-guarded — a GUI failure must not crash
+-- the menu. Returns true if the dialog opened.
+function InGameMenuProduceCollection:openMerchantMarkerPicker()
+    if GrainCollection.bookingsDialog == nil or g_gui == nil then
+        print(("[%s] ERROR: merchant-marker picker dialog not registered"):format(
+            GrainCollection.MOD_NAME))
+        return false
     end
-    local dialog = g_gui:showDialog("ProduceBookingsDialog")
-    if dialog ~= nil and dialog.target ~= nil and dialog.target.setBookings ~= nil then
-        dialog.target:setBookings(GrainCollection.bookings or {}, function()
+    local farmId = (g_currentMission and g_currentMission.getFarmId)
+        and g_currentMission:getFarmId() or 1
+    local markers = {}
+    if GrainCollection.listADMarkers ~= nil then
+        local ok, mk = pcall(GrainCollection.listADMarkers, GrainCollection)
+        if ok and mk ~= nil then markers = mk end
+    end
+    local ok, dialog = pcall(g_gui.showDialog, g_gui, "ProduceBookingsDialog")
+    if not ok or dialog == nil then
+        print(("[%s] ERROR: showDialog('ProduceBookingsDialog') failed: %s"):format(
+            GrainCollection.MOD_NAME, tostring(dialog)))
+        return false
+    end
+    if dialog.target ~= nil and dialog.target.setMarkers ~= nil then
+        dialog.target:setMarkers(markers, farmId, function()
             self:reloadFromBackend()
         end)
     end
+    return true
 end
 
 -- ============================================================

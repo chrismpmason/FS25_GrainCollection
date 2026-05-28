@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="108">
     <author>Chris Mason (Hartwell Farm)</author>
-    <version>0.5.0.1</version>
+    <version>0.5.99.47</version>
     <title>
         <en>Produce Collection Service</en>
     </title>
     <iconFilename>icon_grainCollection.dds</iconFilename>
     <description>
         <en><![CDATA[
-Book a merchant to collect produce directly from your on-farm silos, just like in real life — no more driving trailers to the sell point yourself.
+Book a merchant haulier to collect grain directly from your on-farm silos. A truck spawns at your chosen merchant arrival point, drives to the silo, loads, drives to the best-paying buyer, sells, and despawns. Multi-trip for large silos.
 
-Built for seasonal planning: at a glance, see every grain you own, the best buyer, the best month — then BOOK the collection for today or for the best month in one click. Pricing follows the same per-month seasonal factors the Prices menu uses, so booking for a peak month rides the peak.
+REQUIRES AUTODRIVE — this mod uses your AutoDrive waypoint network for routing. Without AutoDrive installed and a waypoint network drawn on your map, the haulier cannot dispatch.
 
-v0.4.0 — TSStockCheck-pattern table + Book button
-- One info-dense tab injected into the in-game menu, next to Prices (no more standalone F7 menu wrapper — F7 jumps straight to the tab).
-- Per-grain row: total volume across silos, current £/L, current value (colour-coded vs best), trend arrow, best buyer, max £/L, best value, best month. Sortable headers.
-- BOOK button per row → 3-option modal: "Book now", "Book in {best month}", or Cancel.
-- "View Bookings (N)" button opens a modal list of pending collections with Cancel.
-- Aggregated bookings: picking a grain books a single collection covering every silo that holds it; fulfilment drains across all matching silos at the 9am tick.
-- Colour coding matches TSStockCheck (yellow / dark green / bright green vs best value), with colour-blind palette.
+How it works:
+- Press F7 to open the Produce Collection tab. One row per grain you own, sortable by price / best buyer / best month.
+- Click any row's BOOK button to dispatch the merchant. On first use you'll be asked to pick a merchant arrival point from your AutoDrive markers — choose an open spot with room for the truck to spawn and turn.
+- The merchant truck (vanilla Lizard MultiPurpose, extended cargo) handles the round trip on autopilot. Grain transfer is instant on arrival at each end — see the README for why.
+- Money lands when the truck reaches the buyer. Repeat trips run automatically until the silo is empty.
+
+Vehicle selection (small / large / tractor + trailer) planned for v0.7.
         ]]></en>
     </description>
 
@@ -30,7 +30,19 @@ v0.4.0 — TSStockCheck-pattern table + Book button
         <sourceFile filename="scripts/gui/InGameMenuProduceCollection.lua"/>
         <sourceFile filename="scripts/gui/BookActionDialog.lua"/>
         <sourceFile filename="scripts/gui/ProduceBookingsDialog.lua"/>
+        <sourceFile filename="scripts/dev/DispatchSmokeTest.lua"/>
     </extraSourceFiles>
+
+    <!-- v0.6.x dev: merchant vehicle is the vanilla Lizard MultiPurpose
+         (extended) — fits universally on tight maps. The FH16+Krampe
+         bundle XML stays in vehicles/ but its <storeItem> registration
+         is removed; v0.7's vehicle-selection feature will re-register
+         it as one of the options. Don't strip the XML until then. -->
+    <!--
+    <storeItems>
+        <storeItem xmlFilename="vehicles/fh16KrampeBundle.xml"/>
+    </storeItems>
+    -->
 
     <l10n filenamePrefix="i18n/l10n"/>
 
