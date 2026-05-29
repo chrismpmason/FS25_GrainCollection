@@ -21,7 +21,7 @@ function GrainCollection.dbg(msg)
     end
 end
 
-GrainCollection.HAULAGE_FEE = 0.05         -- 5% deduction from sell-point price (instant path only)
+GrainCollection.HAULAGE_FEE = 0.05         -- 5% haulage fee, applied to every fulfilment path (instant + AutoDrive truck)
 GrainCollection.MIN_LOAD_LITRES = 100      -- noise floor; below this, hide from menu
 GrainCollection.MAX_LEAD_DAYS = 365        -- up to a full year ahead (seasonal planning)
 GrainCollection.SAVEGAME_KEY = "grainCollection"
@@ -202,10 +202,29 @@ end
 --   * best current sell point + per-litre price + priceScale + trend bits
 --   * best projected price/month from getMaxMeanAndMonth
 -- Filtered to types where total >= MIN_LOAD_LITRES.
+-- v0.6.x Option A reservation: sum of pending booked litres per
+-- fillType for this farm. Mod-internal — the silo itself isn't
+-- touched; the menu's Available column subtracts this from the raw
+-- silo level so the player can't double-book the same grain.
+function GrainCollection:getReservedLitresByFillType(farmId)
+    local out = {}
+    for _, b in ipairs(GrainCollection.bookings or {}) do
+        if b.farmId == farmId and b.fillTypeIndex ~= nil then
+            out[b.fillTypeIndex] = (out[b.fillTypeIndex] or 0) + (b.litres or 0)
+        end
+    end
+    return out
+end
+
+
 function GrainCollection:getAggregatedProduce(farmId)
     local entries = self:getOwnedSilos(farmId) or {}
     local byType = {}
     local order = {}
+    -- Pre-compute reservation totals; subtracted from each agg's
+    -- totalLitres below so the displayed Volume reflects bookable
+    -- grain (silo level minus pending bookings).
+    local reserved = self:getReservedLitresByFillType(farmId)
     for _, e in ipairs(entries) do
         local agg = byType[e.fillTypeIndex]
         if agg == nil then
@@ -265,9 +284,24 @@ function GrainCollection:getAggregatedProduce(farmId)
         agg.siloCount = agg.siloCount + 1
     end
 
+    -- Apply reservation subtraction.
+    --   siloLitres    = raw silo level (preserved for code that needs it)
+    --   totalReserved = sum of pending bookings (for "X L booked" display)
+    --   totalLitres   = bookable remainder (silo - reserved)
+    --   bookable      = whether BOOK is clickable on this row
+    -- The row is included in the menu when the player has anything at
+    -- stake (grain in silo OR pending booking). Fully-booked rows stay
+    -- visible so the player sees "All booked (N L)" — they don't
+    -- silently vanish. The MIN_LOAD_LITRES gate moves to bookable.
     local out = {}
     for _, agg in ipairs(order) do
-        if agg.totalLitres >= GrainCollection.MIN_LOAD_LITRES then
+        local siloLevel  = agg.totalLitres
+        local resForType = reserved[agg.fillTypeIndex] or 0
+        agg.siloLitres    = siloLevel
+        agg.totalReserved = resForType
+        agg.totalLitres   = math.max(0, siloLevel - resForType)
+        agg.bookable      = agg.totalLitres >= GrainCollection.MIN_LOAD_LITRES
+        if siloLevel >= GrainCollection.MIN_LOAD_LITRES or resForType > 0 then
             table.insert(out, agg)
         end
     end
@@ -419,6 +453,14 @@ function GrainCollection:registerGui()
         GrainCollection.bookActionDialog = bookActionDialog
     end)
 
+    -- v0.6.x Modal: pending bookings list + cancel selected.
+    pcall(function()
+        local pendingDialog = PendingBookingsDialog.new(g_i18n)
+        g_gui:loadGui(modDir .. "gui/PendingBookingsDialog.xml",
+            "PendingBookingsDialog", pendingDialog)
+        GrainCollection.pendingBookingsDialog = pendingDialog
+    end)
+
     -- Splice the main tab into the in-game menu's paging element just
     -- before pageStatistics (matches TSStockCheck placement).
     self:fixInGameMenu()
@@ -538,6 +580,24 @@ function GrainCollection:detectAutoDrive()
     print(("[%s] AD=false (FS25_AutoDrive not installed or not loaded yet)"):format(
         GrainCollection.MOD_NAME))
 end
+
+-- v0.6.x soft-dep predicate: should the BOOK click attempt the
+-- AutoDrive truck dispatch (Phase 2)? Returns false to route the
+-- click to the v0.5.0.1 instant-book + scheduled-collection path
+-- (Phase 1). True means Phase 2 is worth attempting — even if no
+-- merchant marker is set yet, Dispatch will request the
+-- picker via its existing needsPicker return path.
+-- Force-Phase-1 cases: no AutoDrive installed, or AutoDrive
+-- installed but the player has drawn no waypoints.
+-- Pcall-wrapped so a broken/updated AD that throws inside
+-- listADMarkers degrades to false rather than crashing BOOK.
+function GrainCollection:isAutoDriveReady(farmId)
+    if not GrainCollection.adAvailable then return false end
+    local ok, markers = pcall(GrainCollection.listADMarkers, GrainCollection)
+    if not ok or type(markers) ~= "table" or #markers == 0 then return false end
+    return true
+end
+
 
 -- Returns a list of AD-equipped vehicles owned by farmId, each entry:
 --   { object, name, available, objectId }
@@ -1046,6 +1106,68 @@ function GrainCollection:calculateQuote(fillTypeIndex, litres, pricePerLitre)
     }
 end
 
+
+-- v0.6.x shared live-price lookup. Single source of truth for the
+-- price at fulfilment moment (Option C pricing — the booking-time
+-- estimate is for display; the actual sale uses today's buyer price).
+-- Both fulfilment paths (instant + AutoDrive truck) call this with the
+-- resolved buyer station; the booking-time estimate is the fallback.
+function GrainCollection:getLiveSalePrice(station, fillTypeIndex, fallback)
+    if station ~= nil and station.getEffectiveFillTypePrice ~= nil then
+        local ok, p = pcall(station.getEffectiveFillTypePrice, station, fillTypeIndex)
+        if ok and p and p > 0 then return p end
+    end
+    return fallback or 0
+end
+
+
+-- v0.6.x SHARED PAYOUT. Single source of truth for the haulage fee,
+-- the addMoney credit, and the player-facing notification. Both
+-- fulfilment paths feed the SAME litres (booked amount, capped to
+-- what was actually moved) and the SAME price (live at fulfilment)
+-- so they can never drift apart.
+--
+-- Parameters:
+--   litres        — chargeable litres (caller has already capped at min(moved, booked))
+--   pricePerLitre — live price at fulfilment moment (from getLiveSalePrice)
+--   fillTypeIndex — for the MoneyType + notification text
+--   farmId        — credit recipient
+--   buyerName     — for the parity log
+--
+-- Returns (gross, fee, net). One parity log line per call so both paths
+-- are checkable side by side: litres, price, gross, fee, net, buyer.
+function GrainCollection:settleBookingPayout(litres, pricePerLitre, fillTypeIndex, farmId, buyerName)
+    litres        = litres or 0
+    pricePerLitre = pricePerLitre or 0
+    local gross = litres * pricePerLitre
+    local fee   = gross * GrainCollection.HAULAGE_FEE
+    local net   = gross - fee
+
+    if net > 0 and g_currentMission ~= nil and g_currentMission.addMoney ~= nil then
+        local moneyType = self:getMoneyTypeForFillType(fillTypeIndex)
+            or MoneyType.SOLD_PRODUCTS
+        pcall(g_currentMission.addMoney, g_currentMission, net, farmId, moneyType, true, true)
+    end
+
+    local ft = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(fillTypeIndex)
+    local fillTitle = (ft and ft.title) or "Produce"
+    local bannerText = string.format(g_i18n:getText("notify_banner"),
+        formatLitres(litres), fillTitle, g_i18n:formatMoney(net))
+    self:showBanner(bannerText)
+    if g_currentMission and g_currentMission.addIngameNotification then
+        g_currentMission:addIngameNotification(
+            FSBaseMission.INGAME_NOTIFICATION_OK, bannerText)
+    end
+
+    -- ONE parity log line. Same format from both paths — eyeball
+    -- comparison should make instant vs truck identical to the penny.
+    print(("[%s] [payout] litres=%.2f price=%.4f gross=%.2f fee=%.2f net=%.2f buyer='%s' farmId=%s"):format(
+        GrainCollection.MOD_NAME, litres, pricePerLitre,
+        gross, fee, net, tostring(buyerName or "?"), tostring(farmId)))
+
+    return gross, fee, net
+end
+
 -- ============================================================
 -- Booking
 -- ============================================================
@@ -1119,6 +1241,23 @@ function GrainCollection:cancelBooking(bookingId)
     return false
 end
 
+
+-- v0.6.x CP3: silent removal of a booking by id. Used by the AutoDrive
+-- dispatcher (Dispatch:endCollection) to consume the booking
+-- after the truck flow completes — success, failure, or partial. No
+-- "Cancelled" notification (the truck flow has its own completion
+-- toast); the reservation releases automatically since the booking
+-- record is what getReservedLitresByFillType reads.
+function GrainCollection:removeBookingById(bookingId)
+    for i, b in ipairs(GrainCollection.bookings) do
+        if b.id == bookingId then
+            table.remove(GrainCollection.bookings, i)
+            return true
+        end
+    end
+    return false
+end
+
 -- ============================================================
 -- Tick: check for due collections
 -- ============================================================
@@ -1139,7 +1278,11 @@ function GrainCollection:hourChanged()
 
     local toProcess = {}
     for i, b in ipairs(GrainCollection.bookings) do
-        if b.dueDay <= currentDay and readyToProcess then
+        -- v0.6.x CP3: skip bookings that processCollection already handed
+        -- off to the AutoDrive dispatcher. inFlight is cleared when the
+        -- dispatcher's endCollection removes the booking entirely; until
+        -- then the truck is doing the work and we mustn't double-fire.
+        if b.dueDay <= currentDay and readyToProcess and not b.inFlight then
             table.insert(toProcess, i)
         end
     end
@@ -1151,8 +1294,15 @@ function GrainCollection:hourChanged()
 
     for i = #toProcess, 1, -1 do
         local idx = toProcess[i]
-        self:processCollection(GrainCollection.bookings[idx])
-        table.remove(GrainCollection.bookings, idx)
+        -- processCollection returns false when it deferred to AutoDrive;
+        -- in that case the booking stays in the list (marked inFlight)
+        -- until Dispatch:endCollection removes it. Any other
+        -- return value (including nil from the instant path) means the
+        -- booking is consumed and should be removed now.
+        local deferred = self:processCollection(GrainCollection.bookings[idx]) == false
+        if not deferred then
+            table.remove(GrainCollection.bookings, idx)
+        end
     end
 end
 
@@ -1180,7 +1330,36 @@ function GrainCollection:processCollection(booking)
         return
     end
 
-    -- Option C pricing: re-query the booked station for TODAY's price. Fall
+    -- v0.6.x CP3 unified flow: AutoDrive is a visual layer over the
+    -- shared booking system. When AD is installed and the player has a
+    -- waypoint network, hand the booking to the truck dispatcher; it
+    -- drains silos + credits money per trip, then calls
+    -- removeBookingById on completion. Otherwise the instant path runs.
+    -- Returning false here tells hourChanged to LEAVE the booking in
+    -- the list (the dispatcher owns its lifecycle now).
+    if GrainCollection:isAutoDriveReady(booking.farmId)
+            and Dispatch ~= nil
+            and type(Dispatch.startCollectionForBooking) == "function" then
+        booking.inFlight = true
+        local ok, dispatched = pcall(Dispatch.startCollectionForBooking,
+            Dispatch, booking)
+        if ok and dispatched ~= false then
+            print(("[%s]   booking %d handed to AutoDrive dispatcher"):format(
+                GrainCollection.MOD_NAME, booking.id))
+            return false
+        end
+        -- Dispatch failed (no merchant marker, station gone, etc.) —
+        -- fall through to the instant path. Clear the in-flight flag so
+        -- hourChanged doesn't keep skipping it on retry.
+        booking.inFlight = nil
+        print(("[%s]   AutoDrive dispatch failed for booking %d — falling back to instant"):format(
+            GrainCollection.MOD_NAME, booking.id))
+    end
+
+    -- Option C pricing: re-query the booked station for today's price.
+    -- Same lookup the AutoDrive path uses at endCollection — feeds into
+    -- the same settleBookingPayout helper so the two paths can't drift.
+    -- Fall
     -- back to the booking-time estimate if the station can't be resolved.
     local livePrice = nil
     if booking.unloadingStationName ~= nil and booking.unloadingStationName ~= ""
@@ -1250,27 +1429,14 @@ function GrainCollection:processCollection(booking)
         return
     end
 
-    local quote = self:calculateQuote(
-        booking.fillTypeIndex, actualLitres, effectivePrice)
-
-    local moneyType = self:getMoneyTypeForFillType(booking.fillTypeIndex)
-        or MoneyType.SOLD_PRODUCTS
-    g_currentMission:addMoney(quote.net, booking.farmId, moneyType, true, true)
-
-    print(("[%s]   collection complete: paid £%d to farm %d (moneyType=%s)"):format(
-        GrainCollection.MOD_NAME, math.floor(quote.net), booking.farmId,
-        tostring(moneyType)))
-
-    local ft = g_fillTypeManager:getFillTypeByIndex(booking.fillTypeIndex)
-    local fillTitle = (ft and ft.title) or "Produce"
-    local bannerText = string.format(g_i18n:getText("notify_banner"),
-        formatLitres(actualLitres),
-        fillTitle,
-        g_i18n:formatMoney(quote.net))
-
-    self:showBanner(bannerText)
-    g_currentMission:addIngameNotification(
-        FSBaseMission.INGAME_NOTIFICATION_OK, bannerText)
+    -- v0.6.x haulage parity: route through the shared payout helper so
+    -- the instant path and the AutoDrive truck path use identical
+    -- maths (booked litres + live price - 5% fee). Litres is capped at
+    -- booking.litres in case actualLitres drifts upward by a rounding
+    -- step during the silo drain; this mirrors the truck path's cap.
+    local chargeable = math.min(actualLitres, booking.litres or actualLitres)
+    self:settleBookingPayout(chargeable, effectivePrice,
+        booking.fillTypeIndex, booking.farmId, booking.unloadingStationName)
 end
 
 -- ============================================================

@@ -12,10 +12,17 @@
             </BoxLayout>
             <!-- v0.4.4: lives inside the header panel, anchored middle-right
                  with X offset to clear the BALANCE pill. Previously a sibling
-                 of the header which placed it at Y=-100 (over table rows). -->
+                 of the header which placed it at Y=-100 (over table rows).
+                 v0.6: two buttons — Pending bookings list (with cancel) and
+                 the AutoDrive merchant-arrival-point picker. -->
             <Button profile="gc_viewBookingsButton" id="viewBookingsButton"
+                    position="-310px 0px"
                     text="$l10n_ui_view_bookings"
                     onClick="onClickViewBookings"/>
+            <Button profile="gc_viewBookingsButton" id="merchantPointButton"
+                    position="-540px 0px"
+                    text="$l10n_ui_merchant_point"
+                    onClick="onClickMerchantPoint"/>
         </GuiElement>
 
         <!-- Sortable column headers. Sort-indicator Bitmaps default to

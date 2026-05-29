@@ -1,23 +1,28 @@
 --
--- DispatchSmokeTest.lua — merchant haulier dispatch.
+-- Dispatch.lua — merchant haulier dispatch (AutoDrive path).
 --
--- Production dispatch system for the BOOK button in the Produce
--- Collection menu. Spawns the configured merchant vehicle at the
--- player-set merchant-arrival marker, lets AutoDrive path it to the
--- silo, direct-loads grain, lets AutoDrive path it to the buyer's
--- nearest marker, direct-sells, despawns. Loops for multi-trip
--- collections until the silo is empty or MAX_TRIPS is reached.
+-- Production dispatch for the AutoDrive fulfilment mode. When a booking
+-- reaches its due hour and the player has AutoDrive set up,
+-- GrainCollection:processCollection hands the booking here via
+-- Dispatch:startCollectionForBooking. We spawn the merchant vehicle
+-- at the player's arrival marker, let AutoDrive drive it to the silo,
+-- direct-load grain (capped to the booked amount), let AutoDrive
+-- drive it to the buyer's nearest marker, despawn, and settle the
+-- payout once at the end via GrainCollection:settleBookingPayout —
+-- the same shared helper the instant path uses, so the two routes
+-- pay identical nets to the penny.
 --
--- File name is historical (the v0.5 series was a smoke test for the
--- driving controller). v0.7 will rename to HaulierDispatch.
+-- For booked totals larger than one truck load the dispatcher loops
+-- multi-trip until the booking is fulfilled (or MAX_TRIPS / silo-empty
+-- ends it).
 --
 
-DispatchSmokeTest = {}
-DispatchSmokeTest.MOD_NAME = g_currentModName or "FS25_GrainCollection"
+Dispatch = {}
+Dispatch.MOD_NAME = g_currentModName or "FS25_GrainCollection"
 
-DispatchSmokeTest.dispatchInProgress = false
-DispatchSmokeTest.dispatchCount      = 0
-DispatchSmokeTest.activeVehicle      = nil
+Dispatch.dispatchInProgress = false
+Dispatch.dispatchCount      = 0
+Dispatch.activeVehicle      = nil
 
 -- Merchant vehicle: vanilla Lizard MultiPurpose "Dragon" with the
 -- Extension configurationSet applied. Single vehicle (no trailer) so
@@ -26,8 +31,8 @@ DispatchSmokeTest.activeVehicle      = nil
 -- (animation 2, cylindered 2, fillVolume 2, fillUnit 2, trailer 2,
 -- dischargeable 2, tensionBelts 3). Applied via
 -- VehicleLoadingData:setConfigurations at spawn time.
-DispatchSmokeTest.VEHICLE_XML            = "data/vehicles/lizard/multiPurposeTruck/multiPurposeTruck.xml"
-DispatchSmokeTest.VEHICLE_CONFIGURATIONS = {
+Dispatch.VEHICLE_XML            = "data/vehicles/lizard/multiPurposeTruck/multiPurposeTruck.xml"
+Dispatch.VEHICLE_CONFIGURATIONS = {
     animation     = 2,
     cylindered    = 2,
     fillVolume    = 2,
@@ -44,56 +49,69 @@ DispatchSmokeTest.VEHICLE_CONFIGURATIONS = {
 -- load. Restore by re-enabling the storeItem and routing beginSpawn
 -- through resolveBundleStoreItem for whichever vehicle the player
 -- picks.
-DispatchSmokeTest.BUNDLE_XML_SUFFIX  = "fh16KrampeBundle.xml"
-DispatchSmokeTest.BUNDLE_NAME        = "Grain Haulier (FH16 + SKS 30/1050)"
+Dispatch.BUNDLE_XML_SUFFIX  = "fh16KrampeBundle.xml"
+Dispatch.BUNDLE_NAME        = "Grain Haulier (FH16 + SKS 30/1050)"
 
 -- AutoDrive per-vehicle cornerSpeed index. Index 1 = 0.5 = "50%" —
 -- corners taken at half AutoDrive's default cornering curve.
-DispatchSmokeTest.AD_CORNER_SPEED_INDEX = 1
+Dispatch.AD_CORNER_SPEED_INDEX = 1
 
 -- Multi-trip collection config.
-DispatchSmokeTest.SPAWN_DISTANCE           = 50      -- metres back from the silo AI node
-DispatchSmokeTest.BETWEEN_TRIPS_DELAY_MS   = 8000    -- ms; pause between trips
-DispatchSmokeTest.MAX_TRIPS                = 10      -- runaway guard
-DispatchSmokeTest.PRICE_PER_LITRE_FALLBACK = 0.30    -- £/L if economy lookup fails
+Dispatch.SPAWN_DISTANCE           = 50      -- metres back from the silo AI node
+Dispatch.BETWEEN_TRIPS_DELAY_MS   = 8000    -- ms; pause between trips
+Dispatch.MAX_TRIPS                = 10      -- runaway guard
+Dispatch.PRICE_PER_LITRE_FALLBACK = 0.30    -- £/L if economy lookup fails
 
 -- Proximity arrival radii. AutoDrive can wedge trying to dock at tight
 -- markers; we treat the leg as complete and stop AD cleanly once the
 -- truck is within the leg's radius. Buyer wider than silo because
 -- unload approach roads tend to be wider than silo aprons.
-DispatchSmokeTest.ARRIVAL_RADIUS        = 20     -- silo leg
-DispatchSmokeTest.BUYER_ARRIVAL_RADIUS  = 30     -- buyer leg
-DispatchSmokeTest.proximityLogAcc       = 0
+Dispatch.ARRIVAL_RADIUS        = 20     -- silo leg
+Dispatch.BUYER_ARRIVAL_RADIUS  = 30     -- buyer leg
+Dispatch.proximityLogAcc       = 0
 
 -- Collection (multi-trip) state. A "collection" = one BOOK click:
 -- spawn → silo → load → buyer → sell → despawn, repeated until the
 -- silo is empty or MAX_TRIPS is reached.
-DispatchSmokeTest.tripState                  = "idle"  -- idle | active | between-trips
-DispatchSmokeTest.tripNumber                 = 0
-DispatchSmokeTest.tripSaleDone               = false
-DispatchSmokeTest.tripLoadedLitres           = 0
-DispatchSmokeTest.betweenTripsTimer          = nil
-DispatchSmokeTest.collectionLoadingStation   = nil
-DispatchSmokeTest.collectionUnloadingStation = nil
-DispatchSmokeTest.collectionFillType         = nil
-DispatchSmokeTest.collectionTotalLitres      = 0
-DispatchSmokeTest.collectionTotalPaid        = 0
-DispatchSmokeTest.collectionSpawn            = nil   -- {x, y, z, dirX, dirZ}
-DispatchSmokeTest.collectionGrainStorage     = nil
-DispatchSmokeTest.collectionGrainPlaceable   = nil
+Dispatch.tripState                  = "idle"  -- idle | active | between-trips
+Dispatch.tripNumber                 = 0
+Dispatch.tripSaleDone               = false
+Dispatch.tripLoadedLitres           = 0
+Dispatch.betweenTripsTimer          = nil
+Dispatch.collectionLoadingStation   = nil
+Dispatch.collectionUnloadingStation = nil
+Dispatch.collectionFillType         = nil
+Dispatch.collectionTotalLitres      = 0
+Dispatch.collectionTotalPaid        = 0
+Dispatch.collectionSpawn            = nil   -- {x, y, z, dirX, dirZ}
+Dispatch.collectionGrainStorage     = nil
+Dispatch.collectionGrainPlaceable   = nil
+-- v0.6.x CP3 booking-driven dispatch. When a GrainCollection booking
+-- reaches its due hour and AutoDrive is ready, processCollection hands
+-- it off to startCollectionForBooking, which sets these two fields.
+-- collectionLitresCap bounds the multi-trip total at the booked amount
+-- (the silo may hold more — only deliver what was actually booked).
+-- collectionBookingId is removed from GrainCollection.bookings when
+-- endCollection runs, so the reservation is released.
+Dispatch.collectionBookingId        = nil
+Dispatch.collectionLitresCap        = nil
+-- v0.6.x haulage parity: booking-time price estimate, snapshotted at
+-- dispatch. Used as the fallback in endCollection's live-price lookup
+-- so a transient station-query failure doesn't drop the payout to £0.
+Dispatch.collectionBookingPriceEst  = nil
 
 -- AutoDrive driving state.
-DispatchSmokeTest.AD_MATCH_RADIUS   = 50     -- m; max silo/buyer -> marker distance
-DispatchSmokeTest.adLeg             = nil    -- nil | "to-silo" | "to-buyer"
-DispatchSmokeTest.adLegTruck        = nil
-DispatchSmokeTest.adTrailer         = nil    -- nil for the Lizard; populated for v0.7 combo
-DispatchSmokeTest.adSiloMarkerId    = nil
-DispatchSmokeTest.adBuyerMarkerId   = nil    -- proximity-matched to best buyer
-DispatchSmokeTest.adSpawnMarkerId   = nil    -- player-set merchant arrival marker
-DispatchSmokeTest.adSiloMarkerPos   = nil    -- {x, z}
-DispatchSmokeTest.adBuyerMarkerPos  = nil    -- {x, z}
-DispatchSmokeTest.adSpawnMarkerPos  = nil    -- {x, y, z}
-DispatchSmokeTest.adLegPollAcc      = 0
+Dispatch.AD_MATCH_RADIUS   = 50     -- m; max silo/buyer -> marker distance
+Dispatch.adLeg             = nil    -- nil | "to-silo" | "to-buyer"
+Dispatch.adLegTruck        = nil
+Dispatch.adTrailer         = nil    -- nil for the Lizard; populated for v0.7 combo
+Dispatch.adSiloMarkerId    = nil
+Dispatch.adBuyerMarkerId   = nil    -- proximity-matched to best buyer
+Dispatch.adSpawnMarkerId   = nil    -- player-set merchant arrival marker
+Dispatch.adSiloMarkerPos   = nil    -- {x, z}
+Dispatch.adBuyerMarkerPos  = nil    -- {x, z}
+Dispatch.adSpawnMarkerPos  = nil    -- {x, y, z}
+Dispatch.adLegPollAcc      = 0
 
 local function logf(fmt, ...)
     print(string.format("[FS25_GrainCollection][Dispatch] " .. fmt, ...))
@@ -106,8 +124,8 @@ end
 -- returned an empty string on these task instances — direct comparison
 -- side-steps whatever ClassUtil quirk is at play.
 -- (FillUnit.lua:1485).
-function DispatchSmokeTest:doDirectLoad(job)
-    local src      = DispatchSmokeTest.collectionGrainStorage
+function Dispatch:doDirectLoad(job)
+    local src      = Dispatch.collectionGrainStorage
         or (job.loadingStationParameter and job.loadingStationParameter:getLoadingStation())
     local fillType = job.fillTypeParameter and job.fillTypeParameter:getFillTypeIndex()
     local farmId   = g_currentMission and g_currentMission:getFarmId()
@@ -124,17 +142,21 @@ function DispatchSmokeTest:doDirectLoad(job)
     local toolType = (ToolType ~= nil and ToolType.TRIGGER) or nil
     local ftDesc   = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(fillType)
     local ftName   = (ftDesc and ftDesc.name) or tostring(fillType)
-    local srcKind  = (src.removeFillLevel ~= nil and "LoadingStation (removeFillLevel)")
-        or (src.setFillLevel ~= nil and "Storage (setFillLevel)") or "unknown"
-    logf("[direct-load] grain source = %s, fillType=%s, startLevel=%.0fL",
-        srcKind, ftName, (src:getFillLevel(fillType, farmId)) or 0)
-
     for _, info in ipairs(nodes) do
         local v, fui = info.vehicle, info.fillUnitIndex
         if v ~= nil and fui ~= nil then
             local freeCap = (v.getFillUnitFreeCapacity and v:getFillUnitFreeCapacity(fui)) or 0
             local before  = (src:getFillLevel(fillType, farmId)) or 0
             local want    = math.min(freeCap, before)
+            -- v0.6.x CP3: when booking-driven, cap the take so total
+            -- delivered ≤ booking.litres. Previous trips count via
+            -- collectionTotalLitres; this trip so far via tripLoadedLitres.
+            if Dispatch.collectionLitresCap ~= nil then
+                local remaining = Dispatch.collectionLitresCap
+                    - (Dispatch.collectionTotalLitres or 0)
+                    - (Dispatch.tripLoadedLitres or 0)
+                want = math.min(want, math.max(0, remaining))
+            end
             if want > 0 then
                 -- Drain the silo FIRST; add to the truck only what the
                 -- silo actually gave up (measured by the level delta).
@@ -158,12 +180,7 @@ function DispatchSmokeTest:doDirectLoad(job)
                 -- v0.5.99.28: accumulate the authoritative amount actually
                 -- taken FROM THE SILO (the source level delta cannot be
                 -- fooled by duplicate fillUnit indices).
-                DispatchSmokeTest.tripLoadedLitres = DispatchSmokeTest.tripLoadedLitres + removed
-                logf("[direct-load] fillUnit%d: want=%.0fL siloGave=%.0fL truckTook=%.0fL newTruckLevel=%.0fL siloLeft=%.0fL",
-                    fui, want, removed, tAfter - tBefore, tAfter, afterSrc)
-            else
-                logf("[direct-load] fillUnit%d: nothing to transfer (freeCap=%.0fL siloLevel=%.0fL)",
-                    fui, freeCap, before)
+                Dispatch.tripLoadedLitres = Dispatch.tripLoadedLitres + removed
             end
         end
     end
@@ -190,45 +207,117 @@ local function gcToast(text, severity)
     pcall(g_currentMission.addIngameNotification, g_currentMission, kind, text)
 end
 
-function DispatchSmokeTest:loadMap(name)
+function Dispatch:loadMap(name)
     logf("loaded — merchant haulier ready (AutoDrive)")
 end
 
-function DispatchSmokeTest:update(dt)
+function Dispatch:update(dt)
     -- Between-trips delay countdown for multi-trip collections.
-    if DispatchSmokeTest.tripState == "between-trips"
-            and DispatchSmokeTest.betweenTripsTimer ~= nil then
-        DispatchSmokeTest.betweenTripsTimer = DispatchSmokeTest.betweenTripsTimer - (dt or 0)
-        if DispatchSmokeTest.betweenTripsTimer <= 0 then
-            DispatchSmokeTest.betweenTripsTimer = nil
-            logf("[collection] between-trips delay elapsed — dispatching next trip")
-            pcall(DispatchSmokeTest.startNextTrip, DispatchSmokeTest)
+    if Dispatch.tripState == "between-trips"
+            and Dispatch.betweenTripsTimer ~= nil then
+        Dispatch.betweenTripsTimer = Dispatch.betweenTripsTimer - (dt or 0)
+        if Dispatch.betweenTripsTimer <= 0 then
+            Dispatch.betweenTripsTimer = nil
+            pcall(Dispatch.startNextTrip, Dispatch)
         end
     end
 
     -- AutoDrive per-frame leg poll. Self-gates on adLeg; no-op when idle.
-    pcall(DispatchSmokeTest.updateAutoDrive, DispatchSmokeTest, dt)
+    pcall(Dispatch.updateAutoDrive, Dispatch, dt)
 end
 
 -- v0.5.99.8: per-task lifecycle tracker. Called every frame while a job
 -- is active. For each task in job.tasks we keep a record of how many
 -- times we've observed it transition into isRunning=true and into
 -- isFinished=true. Also logs every internal `state` change (e.g.
+-- v0.6.x CP3: walk the unloading stations and return the one whose name
+-- matches `name`. Used by startCollectionForBooking to convert the
+-- booking's stored station name back into a live station object.
+function Dispatch:resolveStationByName(name)
+    if name == nil or name == "" then return nil end
+    if g_currentMission == nil or g_currentMission.storageSystem == nil
+            or g_currentMission.storageSystem.getUnloadingStations == nil then
+        return nil
+    end
+    for _, station in pairs(g_currentMission.storageSystem:getUnloadingStations()) do
+        local stationName
+        if station.getName ~= nil then
+            local ok, n = pcall(station.getName, station)
+            if ok and n then stationName = n end
+        end
+        if stationName == nil and station.owningPlaceable ~= nil
+                and station.owningPlaceable.getName ~= nil then
+            local ok, n = pcall(station.owningPlaceable.getName, station.owningPlaceable)
+            if ok and n then stationName = n end
+        end
+        if stationName == name then return station end
+    end
+    return nil
+end
+
+
+-- v0.6.x CP3: fulfilment-time entry for a Phase 1 booking. Resolves the
+-- booked station back from its name, builds a row-shaped object that the
+-- existing dispatcher understands, sets the booking-cap state, and calls
+-- startCollectionFromMenu. Returns (ok, message) — on failure the caller
+-- (GrainCollection:processCollection) falls back to the instant path.
+-- The booking-cap state is cleared on early failure so subsequent
+-- bookings aren't tainted.
+function Dispatch:startCollectionForBooking(booking)
+    if booking == nil or booking.fillTypeIndex == nil then
+        return false, "Invalid booking"
+    end
+    if Dispatch.tripState ~= "idle" or Dispatch.dispatchInProgress then
+        return false, "A collection is already in progress"
+    end
+
+    local buyer = self:resolveStationByName(booking.unloadingStationName)
+    if buyer == nil then
+        logf("[BOOK-AD] booked buyer '%s' not found",
+            tostring(booking.unloadingStationName))
+        return false, "Booked buyer not found"
+    end
+
+    local row = {
+        fillTypeIndex    = booking.fillTypeIndex,
+        bestBuyerStation = buyer,
+        bestBuyerName    = booking.unloadingStationName,
+        hasSellPoint     = true,
+    }
+
+    -- Set cap + booking id BEFORE startCollectionFromMenu so the cap is
+    -- in place when the first doDirectLoad fires. If startCollectionFromMenu
+    -- fails early (no merchant marker, no silo, etc.) we clear them so
+    -- the caller's fallback path runs with clean state.
+    Dispatch.collectionBookingId        = booking.id
+    Dispatch.collectionLitresCap        = booking.litres
+    Dispatch.collectionBookingPriceEst  = booking.pricePerLitre
+
+    local ok, msg = self:startCollectionFromMenu(row)
+    if not ok then
+        Dispatch.collectionBookingId = nil
+        Dispatch.collectionLitresCap = nil
+        return false, msg
+    end
+    return true
+end
+
+
 -- BOOK click entry point. Resolves the row's fillType + best buyer +
 -- owned silo, matches AutoDrive markers, then kicks off the multi-trip
 -- collection. Returns (ok, message, needsPicker) — the menu uses
 -- needsPicker=true to open the marker picker when the player hasn't
 -- yet set a merchant arrival point.
-function DispatchSmokeTest:startCollectionFromMenu(row)
+function Dispatch:startCollectionFromMenu(row)
     if g_currentMission == nil or not g_currentMission:getIsClient() then
         return false, "Not in an active game"
     end
     if row == nil or row.fillTypeIndex == nil then
         return false, "Invalid produce row"
     end
-    if DispatchSmokeTest.tripState ~= "idle" or DispatchSmokeTest.dispatchInProgress then
+    if Dispatch.tripState ~= "idle" or Dispatch.dispatchInProgress then
         logf("[BOOK] collection already running (state=%s, trip %d) — ignoring",
-            tostring(DispatchSmokeTest.tripState), DispatchSmokeTest.tripNumber)
+            tostring(Dispatch.tripState), Dispatch.tripNumber)
         return false, "A collection is already in progress"
     end
 
@@ -268,26 +357,21 @@ function DispatchSmokeTest:startCollectionFromMenu(row)
         return false, "No reachable silo holds " .. ftName
     end
 
-    DispatchSmokeTest.collectionLoadingStation   = loadingStation
-    DispatchSmokeTest.collectionUnloadingStation = buyer
-    DispatchSmokeTest.collectionFillType         = fillTypeIndex
-    DispatchSmokeTest.collectionGrainStorage     = grainStorage
-    DispatchSmokeTest.collectionGrainPlaceable   = grainPlaceable
-    DispatchSmokeTest.collectionTotalLitres      = 0
-    DispatchSmokeTest.collectionTotalPaid        = 0
-    DispatchSmokeTest.tripNumber                 = 0
-    DispatchSmokeTest.dispatchCount = DispatchSmokeTest.dispatchCount + 1
-
-    logf("[BOOK] collection #%d START: fillType='%s' siloLevel=%.0fL silo='%s' buyer='%s'",
-        DispatchSmokeTest.dispatchCount, ftName, fillLevel,
-        tostring(loadingStation.getName and loadingStation:getName() or "?"),
-        tostring(buyer.getName and buyer:getName() or "?"))
+    Dispatch.collectionLoadingStation   = loadingStation
+    Dispatch.collectionUnloadingStation = buyer
+    Dispatch.collectionFillType         = fillTypeIndex
+    Dispatch.collectionGrainStorage     = grainStorage
+    Dispatch.collectionGrainPlaceable   = grainPlaceable
+    Dispatch.collectionTotalLitres      = 0
+    Dispatch.collectionTotalPaid        = 0
+    Dispatch.tripNumber                 = 0
+    Dispatch.dispatchCount = Dispatch.dispatchCount + 1
 
     -- Match three markers up front: silo (proximity), buyer (proximity to
     -- best buyer), spawn (player-chosen merchant arrival). If any fails
     -- we abort BEFORE spawning — matchADMarkers has toasted the player.
-    if not DispatchSmokeTest:matchADMarkers(merchantId) then
-        DispatchSmokeTest:endCollection("AutoDrive marker match failed")
+    if not Dispatch:matchADMarkers(merchantId) then
+        Dispatch:endCollection("AutoDrive marker match failed")
         return false, "Could not match AutoDrive markers — see log"
     end
 
@@ -299,10 +383,10 @@ function DispatchSmokeTest:startCollectionFromMenu(row)
     -- and despawn were both the merchant marker, buyer was purely
     -- financial. Future cleanup pass can drop this HISTORY block once
     -- the restored flow has soaked.
-    local sp = DispatchSmokeTest.adSpawnMarkerPos
-    local sm = DispatchSmokeTest.adSiloMarkerPos
+    local sp = Dispatch.adSpawnMarkerPos
+    local sm = Dispatch.adSiloMarkerPos
     if sp == nil then
-        DispatchSmokeTest:endCollection("merchant marker has no position")
+        Dispatch:endCollection("merchant marker has no position")
         return false, "The merchant arrival marker has no position"
     end
     local dirX, dirZ = 0, 1
@@ -311,11 +395,9 @@ function DispatchSmokeTest:startCollectionFromMenu(row)
         local len = math.sqrt(vx * vx + vz * vz)
         if len > 0.01 then dirX, dirZ = vx / len, vz / len end
     end
-    DispatchSmokeTest.collectionSpawn = { x = sp.x, z = sp.z, dirX = dirX, dirZ = dirZ }
-    logf("[BOOK] spawn = merchant marker (%.1f, %.1f) heading=(%.2f, %.2f); despawn at buyer marker",
-        sp.x, sp.z, dirX, dirZ)
+    Dispatch.collectionSpawn = { x = sp.x, z = sp.z, dirX = dirX, dirZ = dirZ }
 
-    DispatchSmokeTest:startNextTrip()
+    Dispatch:startNextTrip()
     return true, string.format("Merchant dispatched to collect %s", ftName)
 end
 
@@ -323,9 +405,9 @@ end
 -- the player's current world position + facing and stores it (per farm,
 -- persisted) via GrainCollection. The truck then spawns/despawns there.
 -- (F9 and F10 previously both started a collection — F9 was redundant.)
-function DispatchSmokeTest:resolveBundleStoreItem()
+function Dispatch:resolveBundleStoreItem()
     if g_storeManager == nil then return nil end
-    local suffix = DispatchSmokeTest.BUNDLE_XML_SUFFIX
+    local suffix = Dispatch.BUNDLE_XML_SUFFIX
 
     if type(g_storeManager.getItemByXMLFilename) == "function" then
         for _, name in ipairs({ suffix, "vehicles/" .. suffix }) do
@@ -348,7 +430,7 @@ function DispatchSmokeTest:resolveBundleStoreItem()
                         and string.find(fn:lower(), suffix:lower(), 1, true) ~= nil then
                     return item
                 end
-                if item.name == DispatchSmokeTest.BUNDLE_NAME then
+                if item.name == Dispatch.BUNDLE_NAME then
                     return item
                 end
             end
@@ -357,7 +439,7 @@ function DispatchSmokeTest:resolveBundleStoreItem()
     return nil
 end
 
-function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, headingDirZ)
+function Dispatch:beginSpawn(overrideX, overrideZ, headingDirX, headingDirZ)
     if not g_currentMission:getIsServer() then
         logf("ABORT: not server — AISystem:startJob requires isServer (line 541 of AISystem.lua)")
         return
@@ -380,9 +462,6 @@ function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, heading
     end
     local farmId = g_currentMission:getFarmId()
 
-    logf("spawning merchant: Lizard MultiPurpose (Extension), pos=(%.1f, terrain, %.1f) farmId=%s",
-        spawnX, spawnZ, tostring(farmId))
-
     -- v0.6.x: spawn the vanilla Lizard MultiPurpose with the Extension
     -- configurationSet (7,600 L BULK fillUnit, single vehicle, no
     -- trailer to attach — fits on tight maps). The FH16+Krampe bundle
@@ -392,12 +471,12 @@ function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, heading
     local storeItem = nil
     if g_storeManager ~= nil and type(g_storeManager.getItemByXMLFilename) == "function" then
         local ok, item = pcall(g_storeManager.getItemByXMLFilename,
-            g_storeManager, DispatchSmokeTest.VEHICLE_XML)
+            g_storeManager, Dispatch.VEHICLE_XML)
         if ok then storeItem = item end
     end
     if storeItem == nil then
         logf("ABORT: Lizard MultiPurpose store item not found at '%s' — vanilla install missing?",
-            DispatchSmokeTest.VEHICLE_XML)
+            Dispatch.VEHICLE_XML)
         gcToast("Merchant vehicle missing — cannot dispatch", "critical")
         return
     end
@@ -406,16 +485,13 @@ function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, heading
     -- capacity from 3,500 L to 7,600 L. Per-config indices declared at
     -- VEHICLE_CONFIGURATIONS up top.
     if type(data.setConfigurations) == "function" then
-        data:setConfigurations(DispatchSmokeTest.VEHICLE_CONFIGURATIONS)
+        data:setConfigurations(Dispatch.VEHICLE_CONFIGURATIONS)
     end
     if not data.isValid then
         logf("ABORT: VehicleLoadingData.isValid=false for Lizard MultiPurpose '%s'",
             tostring(storeItem.name))
         return
     end
-    logf("[trip %d] vehicle resolved: '%s' (Extension config applied: fillUnit=%d)",
-        DispatchSmokeTest.tripNumber, tostring(storeItem.name),
-        DispatchSmokeTest.VEHICLE_CONFIGURATIONS.fillUnit)
 
     -- v0.6: sample actual terrain height at the spawn XZ rather than
     -- relying on the marker's stored Y. AutoDrive waypoints record Y at
@@ -423,8 +499,8 @@ function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, heading
     -- causing a visible drop on spawn. Pcall-guarded; on failure fall
     -- back to the marker Y (if known), otherwise nil for engine default.
     local markerY
-    if DispatchSmokeTest.adSpawnMarkerPos ~= nil then
-        markerY = DispatchSmokeTest.adSpawnMarkerPos.y
+    if Dispatch.adSpawnMarkerPos ~= nil then
+        markerY = Dispatch.adSpawnMarkerPos.y
     end
     local terrainY
     if g_terrainNode ~= nil then
@@ -440,10 +516,6 @@ function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, heading
     else
         logf("[BOOK] WARN terrain sample failed at (%.1f, %.1f) and no marker Y — using engine default", spawnX, spawnZ)
     end
-    logf("[BOOK] spawn Y: marker=%s terrain=%s using=%s",
-        markerY  and string.format("%.2f", markerY)  or "?",
-        terrainY and string.format("%.2f", terrainY) or "?",
-        spawnY   and string.format("%.2f", spawnY)   or "default")
 
     data:setPosition(spawnX, spawnY, spawnZ)
     -- v0.5.99.29: face the truck along the heading. yaw rotates around
@@ -458,42 +530,19 @@ function DispatchSmokeTest:beginSpawn(overrideX, overrideZ, headingDirX, heading
         local hx, hz = -headingDirX, -headingDirZ
         local ry = math.atan2(hx, hz)
         data:setRotation(0, ry, 0)
-        logf("[trip %d] spawn at (%.1f, %.1f) heading-in=(%.2f, %.2f) negated=(%.2f, %.2f) yaw=%.3f rad",
-            DispatchSmokeTest.tripNumber, spawnX, spawnZ,
-            headingDirX, headingDirZ, hx, hz, ry)
     end
     data:setPropertyState(VehiclePropertyState.MISSION)
     data:setOwnerFarmId(farmId)
     data:setIsSaved(false)
 
-    DispatchSmokeTest.dispatchInProgress = true
-    data:load(DispatchSmokeTest.onSpawned, DispatchSmokeTest, nil)
+    Dispatch.dispatchInProgress = true
+    data:load(Dispatch.onSpawned, Dispatch, nil)
 end
 
--- v0.6 step 1: AutoDrive runtime probe. Confirms the spawned truck
--- carries the AutoDrive specialization (vehicle.ad) and dumps the
--- player's marker network plus the API surface the v0.6 AutoDrive
--- rework will build on. Pure diagnostics — starts/alters nothing.
--- One-line summary: AutoDrive detected? truck carries vehicle.ad?
--- waypoint network present? If the player has no marker network the
--- BOOK click later will toast a clean error from matchADMarkers.
-function DispatchSmokeTest:probeAutoDrive(vehicle)
-    local AD = (GrainCollection ~= nil) and GrainCollection.AD or nil
-    local adAvail = (GrainCollection ~= nil) and GrainCollection.adAvailable
-    local hasAd = vehicle ~= nil and vehicle.ad ~= nil
-    local markers = {}
-    if AD ~= nil and GrainCollection.listADMarkers ~= nil then
-        local ok, mk = pcall(GrainCollection.listADMarkers, GrainCollection)
-        if ok and mk ~= nil then markers = mk end
-    end
-    logf("[AD-probe] AutoDrive=%s truck.ad=%s markers=%d",
-        tostring(adAvail and AD ~= nil), tostring(hasAd), #markers)
-end
-
-function DispatchSmokeTest:onSpawned(vehicles, loadState, args)
+function Dispatch:onSpawned(vehicles, loadState, args)
     local okState = (VehicleLoadingState ~= nil) and (loadState == VehicleLoadingState.OK)
     if not okState or vehicles == nil or #vehicles == 0 then
-        DispatchSmokeTest.dispatchInProgress = false
+        Dispatch.dispatchInProgress = false
         logf("ABORT: spawn failed (loadState=%s vehicles=%d)",
             tostring(loadState), vehicles and #vehicles or 0)
         return
@@ -514,38 +563,49 @@ function DispatchSmokeTest:onSpawned(vehicles, loadState, args)
         end
     end
     local vehicle = truck or vehicles[1]
-    DispatchSmokeTest.adTrailer = trailer
-    logf("merchant vehicle spawned: truck=%s trailer=%s (%d vehicle(s))",
-        tostring(vehicle and vehicle.typeName),
-        tostring(trailer and trailer.typeName), #vehicles)
-    if vehicle ~= nil then
-        logf("  truck rootNode=%s ownerFarmId=%s vehicle.ad=%s",
-            tostring(vehicle.rootNode),
-            tostring(vehicle.getOwnerFarmId and vehicle:getOwnerFarmId() or "?"),
-            tostring(vehicle.ad ~= nil))
-    end
-    if trailer ~= nil then
-        local attachedTo = (trailer.getAttacherVehicle ~= nil)
-            and trailer:getAttacherVehicle() or nil
-        logf("  trailer rootNode=%s attachedTo=%s",
-            tostring(trailer.rootNode),
-            attachedTo ~= nil and tostring(attachedTo.typeName) or "<NOT ATTACHED>")
-    else
-        logf("  WARNING: bundle spawned no trailer — grain capacity missing")
-    end
+    Dispatch.adTrailer = trailer
 
-    -- AutoDrive runtime probe — non-destructive, one-line summary.
-    pcall(DispatchSmokeTest.probeAutoDrive, DispatchSmokeTest, vehicle)
+    -- v0.6.x: capacity check is layout-agnostic. The Lizard MultiPurpose
+    -- is a rigid truck — grain rides on its own bed, no trailer needed.
+    -- A tractor + trailer combo (reserved for v0.7) puts grain on the
+    -- trailer. Either is fine; what matters is that SOMETHING in the
+    -- bundle has a fillUnit that can hold the booked grain. Only warn
+    -- when no vehicle in the bundle can carry it (e.g. wrong storeItem
+    -- registered). Mirrors buildJobShim's source-resolution logic.
+    local fillType = Dispatch.collectionFillType
+    local grainCapable = false
+    for _, v in ipairs(vehicles) do
+        if v ~= nil and v.getFillUnits ~= nil then
+            local okU, fillUnits = pcall(v.getFillUnits, v)
+            if okU and fillUnits ~= nil then
+                for _, fu in ipairs(fillUnits) do
+                    if (fu.capacity or 0) > 0 then
+                        local supports = fu.supportedFillTypes == nil
+                            or fillType == nil
+                            or fu.supportedFillTypes[fillType]
+                        if supports then
+                            grainCapable = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        if grainCapable then break end
+    end
+    if not grainCapable then
+        logf("WARNING: no spawned vehicle has a fillUnit that can hold the booked grain")
+    end
 
     -- AutoDrive is the only driving controller in v0.6.x. Hand the truck
     -- to the trip executor.
-    DispatchSmokeTest.activeVehicle = vehicle
-    local okAD, errAD = pcall(DispatchSmokeTest.startAutoDriveTrip,
-        DispatchSmokeTest, vehicle)
+    Dispatch.activeVehicle = vehicle
+    local okAD, errAD = pcall(Dispatch.startAutoDriveTrip,
+        Dispatch, vehicle)
     if not okAD then
         logf("[AD-trip] startAutoDriveTrip EXCEPTION: %s", tostring(errAD))
-        DispatchSmokeTest.dispatchInProgress = false
-        pcall(DispatchSmokeTest.finishAutoDriveTrip, DispatchSmokeTest, vehicle)
+        Dispatch.dispatchInProgress = false
+        pcall(Dispatch.finishAutoDriveTrip, Dispatch, vehicle)
     end
 end
 
@@ -570,25 +630,25 @@ end
 -- sell point" — that already excludes lime stations because they
 -- aren't spec_silo, but findLoadingStation iterates ALL loading
 -- stations, which is how it could otherwise grab a Lime Station.)
-DispatchSmokeTest.GRAIN_FILLTYPES = { "BARLEY", "CANOLA", "OAT", "WHEAT" }
+Dispatch.GRAIN_FILLTYPES = { "BARLEY", "CANOLA", "OAT", "WHEAT" }
 
 -- Lazily-resolved set of allowed grain fill-type indices (stable per
 -- session once the fill-type manager is up).
-function DispatchSmokeTest:getGrainFillTypeSet()
-    if DispatchSmokeTest._grainSet ~= nil then return DispatchSmokeTest._grainSet end
+function Dispatch:getGrainFillTypeSet()
+    if Dispatch._grainSet ~= nil then return Dispatch._grainSet end
     local set = {}
     if g_fillTypeManager ~= nil and g_fillTypeManager.getFillTypeIndexByName ~= nil then
-        for _, name in ipairs(DispatchSmokeTest.GRAIN_FILLTYPES) do
+        for _, name in ipairs(Dispatch.GRAIN_FILLTYPES) do
             local idx = g_fillTypeManager:getFillTypeIndexByName(name)
             if idx ~= nil then set[idx] = name end
         end
     end
-    DispatchSmokeTest._grainSet = set
+    Dispatch._grainSet = set
     return set
 end
 
 -- v0.5.99.34 diagnostic helper: best-effort display name.
-function DispatchSmokeTest:resolveLoadingStation(placeable, grainObj)
+function Dispatch:resolveLoadingStation(placeable, grainObj)
     if placeable ~= nil then
         if placeable.spec_silo ~= nil and placeable.spec_silo.loadingStation ~= nil then
             return placeable.spec_silo.loadingStation, "spec_silo.loadingStation"
@@ -630,18 +690,8 @@ end
 -- restrictFillTypeIndex (optional): when set, only silos holding that
 -- exact fill type are considered — used by the menu BOOK flow, where the
 -- player picked a specific grain row. nil => best grain across the farm.
-function DispatchSmokeTest:findLoadingStation(farmId, restrictFillTypeIndex)
+function Dispatch:findLoadingStation(farmId, restrictFillTypeIndex)
     local grainSet = self:getGrainFillTypeSet()
-    if restrictFillTypeIndex ~= nil then
-        logf("[findLoadingStation] restricted to fillType index %s",
-            tostring(restrictFillTypeIndex))
-    end
-
-    local gsParts = {}
-    for idx, nm in pairs(grainSet) do
-        table.insert(gsParts, string.format("%s(%s)", nm, tostring(idx)))
-    end
-    logf("[findLoadingStation] grain allow-set = {%s}", table.concat(gsParts, ", "))
 
     if GrainCollection == nil or GrainCollection.getOwnedSilos == nil then
         logf("[findLoadingStation] GrainCollection:getOwnedSilos unavailable — cannot discover grain")
@@ -652,7 +702,6 @@ function DispatchSmokeTest:findLoadingStation(farmId, restrictFillTypeIndex)
         logf("[findLoadingStation] getOwnedSilos failed: %s", tostring(silos))
         return nil, 0, nil
     end
-    logf("[findLoadingStation] getOwnedSilos returned %d entr(ies)", #silos)
 
     -- Pick the grain entry with the most stock.
     local bestEntry = nil
@@ -661,9 +710,6 @@ function DispatchSmokeTest:findLoadingStation(farmId, restrictFillTypeIndex)
         local lvl = e.fillLevel or 0
         if fti ~= nil and grainSet[fti] ~= nil and lvl > 0
                 and (restrictFillTypeIndex == nil or fti == restrictFillTypeIndex) then
-            local ftd = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(fti)
-            logf("[findLoadingStation] grain entry: placeable='%s' fillType=%s level=%.0fL",
-                tostring(e.placeableName), (ftd and ftd.name) or tostring(fti), lvl)
             if bestEntry == nil or lvl > (bestEntry.fillLevel or 0) then
                 bestEntry = e
             end
@@ -689,11 +735,6 @@ function DispatchSmokeTest:findLoadingStation(farmId, restrictFillTypeIndex)
         placeable = station.owningPlaceable
     end
 
-    local ftd = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(bestEntry.fillTypeIndex)
-    logf("[findLoadingStation] picked '%s' fillType=%s stock=%.0fL  loadingStation via %s  placeable=%s",
-        tostring(bestEntry.placeableName), (ftd and ftd.name) or tostring(bestEntry.fillTypeIndex),
-        bestEntry.fillLevel or 0, tostring(how), tostring(placeable ~= nil))
-
     return station, bestEntry.fillLevel or 0, bestEntry.fillTypeIndex,
         bestEntry.storage, placeable
 end
@@ -706,7 +747,7 @@ end
 -- final fallback (warned) is the loading station itself so the test
 -- never crashes.
 -- Returns: station, distance, pickLabel ("named" / "closest" / "fallback-same").
-function DispatchSmokeTest:findUnloadingStation(fillTypeIndex, farmId, refX, refZ, loadingStation)
+function Dispatch:findUnloadingStation(fillTypeIndex, farmId, refX, refZ, loadingStation)
     if g_currentMission.storageSystem == nil
             or g_currentMission.storageSystem.getUnloadingStations == nil then
         return nil
@@ -753,151 +794,152 @@ function DispatchSmokeTest:findUnloadingStation(fillTypeIndex, farmId, refX, ref
 end
 
 -- v0.5.99.27: end the collection — log totals, reset state to idle.
-function DispatchSmokeTest:endCollection(reason)
-    logf("[collection] COMPLETE (%s): %d trip(s), total %.0fL collected, total £%.2f paid",
-        tostring(reason), DispatchSmokeTest.tripNumber,
-        DispatchSmokeTest.collectionTotalLitres, DispatchSmokeTest.collectionTotalPaid)
-    -- v0.6.x UX: final notification only when at least one trip sold
-    -- something. Aborts before any sale (marker match failed, no spawn
-    -- point, etc.) toasted their own error and shouldn't get a "complete"
-    -- banner on top of that.
-    if (DispatchSmokeTest.collectionTotalLitres or 0) > 0 then
-        gcToast(string.format(
-            "Grain collection complete — %sL sold for %s",
-            g_i18n:formatNumber(DispatchSmokeTest.collectionTotalLitres, 0),
-            g_i18n:formatMoney(DispatchSmokeTest.collectionTotalPaid, 0, true, true)), "ok")
+function Dispatch:endCollection(reason)
+    logf("[collection] COMPLETE (%s): %d trip(s), total %.0fL collected",
+        tostring(reason), Dispatch.tripNumber,
+        Dispatch.collectionTotalLitres)
+
+    -- v0.6.x haulage-parity refactor: settle ONCE at the end via the
+    -- shared GrainCollection helper. Both fulfilment paths feed the
+    -- helper the booked litres and the live price queried at fulfilment
+    -- moment, so the net payout is identical to the instant path's.
+    -- Skip the settle on aborts that delivered nothing (marker match
+    -- failed, no spawn point, etc. — those have already toasted their
+    -- own error and shouldn't get a "Collection complete" banner).
+    local bookingId = Dispatch.collectionBookingId
+    if bookingId ~= nil
+            and (Dispatch.collectionTotalLitres or 0) > 0
+            and GrainCollection ~= nil
+            and type(GrainCollection.settleBookingPayout) == "function" then
+        -- Chargeable = min(delivered, booked). Caps any upward
+        -- floating-point drift in the silo drain (the instant path
+        -- does the same cap), and naturally handles silos-ran-short
+        -- (delivered < booked → pay for what actually moved).
+        local cap        = Dispatch.collectionLitresCap or 0
+        local delivered  = Dispatch.collectionTotalLitres or 0
+        local chargeable = math.min(delivered, cap)
+
+        local farmId   = g_currentMission and g_currentMission:getFarmId()
+        local fillType = Dispatch.collectionFillType
+        local buyer    = Dispatch.collectionUnloadingStation
+        local buyerName = (buyer and buyer.getName and buyer:getName()) or "?"
+        local pricePerLitre = GrainCollection:getLiveSalePrice(buyer, fillType,
+            Dispatch.collectionBookingPriceEst)
+
+        local _, _, net = GrainCollection:settleBookingPayout(
+            chargeable, pricePerLitre, fillType, farmId, buyerName)
+        Dispatch.collectionTotalPaid = net or 0
     end
-    DispatchSmokeTest.tripState                  = "idle"
-    DispatchSmokeTest.betweenTripsTimer          = nil
-    DispatchSmokeTest.collectionLoadingStation   = nil
-    DispatchSmokeTest.collectionUnloadingStation = nil
-    DispatchSmokeTest.collectionFillType         = nil
-    DispatchSmokeTest.collectionSpawn            = nil
-    DispatchSmokeTest.collectionGrainStorage     = nil
-    DispatchSmokeTest.collectionGrainPlaceable   = nil
-    DispatchSmokeTest.adLeg                      = nil
-    DispatchSmokeTest.adLegTruck                 = nil
-    DispatchSmokeTest.adTrailer                  = nil
-    DispatchSmokeTest.adSiloMarkerId             = nil
-    DispatchSmokeTest.adBuyerMarkerId            = nil
-    DispatchSmokeTest.adSpawnMarkerId            = nil
-    DispatchSmokeTest.adSiloMarkerPos            = nil
-    DispatchSmokeTest.adBuyerMarkerPos           = nil
-    DispatchSmokeTest.adSpawnMarkerPos           = nil
+
+    -- Booking-driven cleanup: remove the booking record so the
+    -- reservation is released and hourChanged doesn't replay it.
+    -- Fires even on partial / failed dispatches once the chain started.
+    if bookingId ~= nil and GrainCollection ~= nil
+            and type(GrainCollection.removeBookingById) == "function" then
+        local ok, err = pcall(GrainCollection.removeBookingById, GrainCollection, bookingId)
+        if not ok then
+            logf("[collection] removeBookingById failed for id=%s: %s",
+                tostring(bookingId), tostring(err))
+        end
+    end
+    Dispatch.tripState                  = "idle"
+    Dispatch.betweenTripsTimer          = nil
+    Dispatch.collectionLoadingStation   = nil
+    Dispatch.collectionUnloadingStation = nil
+    Dispatch.collectionFillType         = nil
+    Dispatch.collectionSpawn            = nil
+    Dispatch.collectionGrainStorage     = nil
+    Dispatch.collectionGrainPlaceable   = nil
+    Dispatch.collectionBookingId        = nil
+    Dispatch.collectionLitresCap        = nil
+    Dispatch.collectionBookingPriceEst  = nil
+    Dispatch.adLeg                      = nil
+    Dispatch.adLegTruck                 = nil
+    Dispatch.adTrailer                  = nil
+    Dispatch.adSiloMarkerId             = nil
+    Dispatch.adBuyerMarkerId            = nil
+    Dispatch.adSpawnMarkerId            = nil
+    Dispatch.adSiloMarkerPos            = nil
+    Dispatch.adBuyerMarkerPos           = nil
+    Dispatch.adSpawnMarkerPos           = nil
 end
 
 -- v0.5.99.27: dispatch the next trip — or finish if the silo is empty
 -- / MAX_TRIPS reached. Spawns a fresh truck at SPAWN_POINT.
-function DispatchSmokeTest:startNextTrip()
-    local station  = DispatchSmokeTest.collectionLoadingStation
-    local fillType = DispatchSmokeTest.collectionFillType
+function Dispatch:startNextTrip()
+    local station  = Dispatch.collectionLoadingStation
+    local fillType = Dispatch.collectionFillType
     local farmId   = g_currentMission and g_currentMission:getFarmId()
     if station == nil or fillType == nil then
-        DispatchSmokeTest:endCollection("no locked target")
+        Dispatch:endCollection("no locked target")
         return
     end
     local siloLevel = (station.getFillLevel and station:getFillLevel(fillType, farmId)) or 0
     if siloLevel <= 0.5 then
-        DispatchSmokeTest:endCollection("silo empty")
+        Dispatch:endCollection("silo empty")
         return
     end
-    if DispatchSmokeTest.tripNumber >= DispatchSmokeTest.MAX_TRIPS then
-        DispatchSmokeTest:endCollection("MAX_TRIPS reached")
+    if Dispatch.tripNumber >= Dispatch.MAX_TRIPS then
+        Dispatch:endCollection("MAX_TRIPS reached")
         return
     end
-    local sp = DispatchSmokeTest.collectionSpawn
+    local sp = Dispatch.collectionSpawn
     if sp == nil then
-        DispatchSmokeTest:endCollection("no derived spawn point")
+        Dispatch:endCollection("no derived spawn point")
         return
     end
-    DispatchSmokeTest.tripNumber       = DispatchSmokeTest.tripNumber + 1
-    DispatchSmokeTest.tripState        = "active"
-    DispatchSmokeTest.tripSaleDone     = false
-    DispatchSmokeTest.tripLoadedLitres = 0
-    logf("[trip %d] dispatching — siloLevel now %.0fL, spawning truck at (%.1f, %.1f)",
-        DispatchSmokeTest.tripNumber, siloLevel, sp.x, sp.z)
+    Dispatch.tripNumber       = Dispatch.tripNumber + 1
+    Dispatch.tripState        = "active"
+    Dispatch.tripSaleDone     = false
+    Dispatch.tripLoadedLitres = 0
 
-    local ok, err = pcall(DispatchSmokeTest.beginSpawn, DispatchSmokeTest,
+    local ok, err = pcall(Dispatch.beginSpawn, Dispatch,
         sp.x, sp.z, sp.dirX, sp.dirZ)
     if not ok then
-        DispatchSmokeTest.dispatchInProgress = false
-        logf("[trip %d] beginSpawn EXCEPTION: %s", DispatchSmokeTest.tripNumber, tostring(err))
-        DispatchSmokeTest:endCollection("spawn failed")
+        Dispatch.dispatchInProgress = false
+        logf("[trip %d] beginSpawn EXCEPTION: %s", Dispatch.tripNumber, tostring(err))
+        Dispatch:endCollection("spawn failed")
     end
 end
 
 -- v0.5.99.27: despawn the truck once it has returned to DESPAWN_POINT.
-function DispatchSmokeTest:despawnTruck(v)
+function Dispatch:despawnTruck(v)
     -- v0.6: the merchant vehicle is a combo — delete the trailer too.
     -- Delete the implement before the root; Vehicle:delete detaches it.
-    local trailer = DispatchSmokeTest.adTrailer
+    local trailer = Dispatch.adTrailer
     if trailer ~= nil and trailer ~= v and type(trailer.delete) == "function" then
         local ok, err = pcall(trailer.delete, trailer)
-        if ok then logf("[trip %d] trailer despawned", DispatchSmokeTest.tripNumber)
-        else logf("[trip %d] trailer delete failed: %s", DispatchSmokeTest.tripNumber, tostring(err)) end
+        if not ok then
+            logf("[trip %d] trailer delete failed: %s", Dispatch.tripNumber, tostring(err))
+        end
     end
-    DispatchSmokeTest.adTrailer = nil
+    Dispatch.adTrailer = nil
 
     if v == nil then
-        logf("[trip %d] despawnTruck: no vehicle", DispatchSmokeTest.tripNumber)
+        logf("[trip %d] despawnTruck: no vehicle", Dispatch.tripNumber)
         return
     end
     if type(v.delete) == "function" then
         local ok, err = pcall(v.delete, v)
-        if ok then logf("[trip %d] truck despawned", DispatchSmokeTest.tripNumber)
-        else logf("[trip %d] truck delete failed: %s", DispatchSmokeTest.tripNumber, tostring(err)) end
+        if not ok then
+            logf("[trip %d] truck delete failed: %s", Dispatch.tripNumber, tostring(err))
+        end
     else
-        logf("[trip %d] truck has no :delete() — cannot despawn", DispatchSmokeTest.tripNumber)
+        logf("[trip %d] truck has no :delete() — cannot despawn", Dispatch.tripNumber)
     end
 end
 
--- Price per litre for a fill type. Prefers the buyer's effective price
--- (the API GrainCollection.lua's own getSellPointsForFillType uses),
--- then the fill type's base price, then a configured fallback.
-local function gcGetPricePerLitre(station, fillType)
-    if station ~= nil and station.getEffectiveFillTypePrice ~= nil then
-        local ok, p = pcall(station.getEffectiveFillTypePrice, station, fillType)
-        if ok and p and p > 0 then return p, "buyer" end
-    end
-    local ftDesc = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(fillType)
-    if ftDesc and ftDesc.pricePerLiter and ftDesc.pricePerLiter > 0 then
-        return ftDesc.pricePerLiter, "fillType.pricePerLiter"
-    end
-    return DispatchSmokeTest.PRICE_PER_LITRE_FALLBACK, "fallback"
-end
-
--- v0.5.99.27: the "sale". The truck has reached DESPAWN_POINT carrying
--- the grain doDirectLoad transferred into it. We do not physically
--- unload — the grain is sold directly: money is credited, the truck
--- (and its grain) despawns. Per-trip, immediate.
-function DispatchSmokeTest:doDirectSale(job)
-    local fillType = DispatchSmokeTest.collectionFillType
-        or (job.fillTypeParameter and job.fillTypeParameter:getFillTypeIndex())
-    local farmId   = g_currentMission and g_currentMission:getFarmId()
-    local buyer    = DispatchSmokeTest.collectionUnloadingStation
-
-    -- v0.5.99.28: sell exactly what doDirectLoad pulled from the silo
-    -- this trip. The previous approach summed truck fillUnit levels,
-    -- which double-counted — the Lizard MultiPurpose exposes one
-    -- physical cargo hold under multiple fillUnit indices, each
-    -- reporting the full level (2000L hold -> 4000L sum -> 2x money).
-    local litres = DispatchSmokeTest.tripLoadedLitres or 0
-
-    local price, priceSrc = gcGetPricePerLitre(buyer, fillType)
-    local payment   = litres * price
-    local ftDesc    = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(fillType)
-    local ftName    = (ftDesc and ftDesc.title) or tostring(fillType)
-    local buyerName = (buyer and buyer.getName and buyer:getName()) or "?"
-
-    if payment > 0 and g_currentMission ~= nil and g_currentMission.addMoney ~= nil then
-        local moneyType = (MoneyType and (MoneyType.SOLD_PRODUCTS or MoneyType.OTHER)) or nil
-        pcall(g_currentMission.addMoney, g_currentMission, payment, farmId, moneyType, true, true)
-    end
-    DispatchSmokeTest.collectionTotalLitres = DispatchSmokeTest.collectionTotalLitres + litres
-    DispatchSmokeTest.collectionTotalPaid   = DispatchSmokeTest.collectionTotalPaid + payment
-    DispatchSmokeTest.tripSaleDone = true
-    logf("[direct-sale] trip %d: sold %.0fL of %s to '%s' for £%.2f (price=%.3f/L src=%s)",
-        DispatchSmokeTest.tripNumber, litres, ftName, buyerName, payment, price, priceSrc)
+-- v0.6.x haulage-parity refactor: the per-trip "sale" no longer pays.
+-- It just records the litres dropped at the buyer this trip and marks
+-- the trip sale-complete so finishAutoDriveTrip knows to continue the
+-- multi-trip loop. The actual payment fires once at endCollection —
+-- booking.litres × live price − 5% fee — via
+-- GrainCollection:settleBookingPayout, the same shared helper the
+-- instant path uses, so both routes pay the same net to the penny.
+function Dispatch:doDirectSale(job)
+    local litres = Dispatch.tripLoadedLitres or 0
+    Dispatch.collectionTotalLitres = Dispatch.collectionTotalLitres + litres
+    Dispatch.tripSaleDone = true
 end
 
 -- =============================================================
@@ -913,7 +955,7 @@ end
 
 -- World XZ of a placeable or station. Placeables expose rootNode;
 -- stations usually expose it via owningPlaceable (mirrors worldDistanceTo).
-function DispatchSmokeTest:objectWorldXZ(obj)
+function Dispatch:objectWorldXZ(obj)
     if obj == nil then return nil, nil end
     local node = obj.rootNode
     if node == nil and obj.owningPlaceable ~= nil then
@@ -925,7 +967,7 @@ function DispatchSmokeTest:objectWorldXZ(obj)
     return x, z
 end
 
-function DispatchSmokeTest:objectName(obj)
+function Dispatch:objectName(obj)
     if obj == nil then return "?" end
     if obj.getName ~= nil then
         local ok, n = pcall(obj.getName, obj)
@@ -935,7 +977,7 @@ function DispatchSmokeTest:objectName(obj)
 end
 
 -- Nearest marker (from GrainCollection:listADMarkers entries) to an XZ.
-function DispatchSmokeTest:nearestMarker(markers, x, z)
+function Dispatch:nearestMarker(markers, x, z)
     local best, bestD = nil, math.huge
     for _, m in ipairs(markers) do
         local d = math.sqrt((m.x - x) ^ 2 + (m.z - z) ^ 2)
@@ -956,13 +998,13 @@ end
 -- HISTORY: v0.5.99.46 collapsed buyer onto the merchant marker ("return
 -- to spawn" workaround) — buyer was purely financial, truck never
 -- physically visited it. Restored to physical buyer delivery here.
-function DispatchSmokeTest:matchADMarkers(merchantMarkerId)
-    DispatchSmokeTest.adSiloMarkerId   = nil
-    DispatchSmokeTest.adBuyerMarkerId  = nil
-    DispatchSmokeTest.adSpawnMarkerId  = nil
-    DispatchSmokeTest.adSiloMarkerPos  = nil
-    DispatchSmokeTest.adBuyerMarkerPos = nil
-    DispatchSmokeTest.adSpawnMarkerPos = nil
+function Dispatch:matchADMarkers(merchantMarkerId)
+    Dispatch.adSiloMarkerId   = nil
+    Dispatch.adBuyerMarkerId  = nil
+    Dispatch.adSpawnMarkerId  = nil
+    Dispatch.adSiloMarkerPos  = nil
+    Dispatch.adBuyerMarkerPos = nil
+    Dispatch.adSpawnMarkerPos = nil
 
     if GrainCollection == nil or not GrainCollection.adAvailable then
         logf("[AD-match] ABORT: AutoDrive not available")
@@ -981,16 +1023,16 @@ function DispatchSmokeTest:matchADMarkers(merchantMarkerId)
         return false
     end
 
-    local radius = DispatchSmokeTest.AD_MATCH_RADIUS
+    local radius = Dispatch.AD_MATCH_RADIUS
 
     -- Silo marker — nearest AutoDrive marker to the grain silo.
-    local siloX, siloZ = self:objectWorldXZ(DispatchSmokeTest.collectionGrainPlaceable)
+    local siloX, siloZ = self:objectWorldXZ(Dispatch.collectionGrainPlaceable)
     if siloX == nil then
         logf("[AD-match] ABORT: silo world position unresolved")
         gcToast("Cannot dispatch — silo position unknown", "critical")
         return false
     end
-    local siloName = self:objectName(DispatchSmokeTest.collectionGrainPlaceable)
+    local siloName = self:objectName(Dispatch.collectionGrainPlaceable)
     local siloM, siloD = self:nearestMarker(markers, siloX, siloZ)
     if siloM == nil or siloD > radius then
         logf("[AD-match] ABORT: no AutoDrive marker within %dm of silo '%s' at (%.1f, %.1f) — nearest %.0fm",
@@ -998,17 +1040,15 @@ function DispatchSmokeTest:matchADMarkers(merchantMarkerId)
         gcToast("No AutoDrive marker near the silo — please place one", "critical")
         return false
     end
-    logf("[AD-match] silo='%s' marker=%s '%s' distance=%.1fm",
-        siloName, tostring(siloM.id), tostring(siloM.name), siloD)
 
     -- Buyer marker — nearest AutoDrive marker to the best-buyer station.
-    local buyerX, buyerZ = self:objectWorldXZ(DispatchSmokeTest.collectionUnloadingStation)
+    local buyerX, buyerZ = self:objectWorldXZ(Dispatch.collectionUnloadingStation)
     if buyerX == nil then
         logf("[AD-match] ABORT: buyer world position unresolved")
         gcToast("Cannot dispatch — buyer position unknown", "critical")
         return false
     end
-    local buyerName = self:objectName(DispatchSmokeTest.collectionUnloadingStation)
+    local buyerName = self:objectName(Dispatch.collectionUnloadingStation)
     local buyerM, buyerD = self:nearestMarker(markers, buyerX, buyerZ)
     if buyerM == nil or buyerD > radius then
         logf("[BOOK] aborted: no AutoDrive marker within %dm of %s at (%.1f, %.1f) — nearest %.0fm",
@@ -1018,8 +1058,6 @@ function DispatchSmokeTest:matchADMarkers(merchantMarkerId)
             buyerName, buyerName), "critical")
         return false
     end
-    logf("[AD-match] buyer='%s' marker=%s '%s' distance=%.1fm",
-        buyerName, tostring(buyerM.id), tostring(buyerM.name), buyerD)
 
     -- Spawn marker — player's merchant-arrival marker (id lookup, no
     -- proximity match — the player picked it deliberately).
@@ -1034,17 +1072,15 @@ function DispatchSmokeTest:matchADMarkers(merchantMarkerId)
             gcToast("Merchant arrival marker no longer exists — pick another", "critical")
             return false
         end
-        logf("[AD-match] spawn marker (player-set) = %s '%s'",
-            tostring(spawnM.id), tostring(spawnM.name))
     end
 
-    DispatchSmokeTest.adSiloMarkerId   = siloM.id
-    DispatchSmokeTest.adBuyerMarkerId  = buyerM.id
-    DispatchSmokeTest.adSiloMarkerPos  = { x = siloM.x, z = siloM.z }
-    DispatchSmokeTest.adBuyerMarkerPos = { x = buyerM.x, z = buyerM.z }
+    Dispatch.adSiloMarkerId   = siloM.id
+    Dispatch.adBuyerMarkerId  = buyerM.id
+    Dispatch.adSiloMarkerPos  = { x = siloM.x, z = siloM.z }
+    Dispatch.adBuyerMarkerPos = { x = buyerM.x, z = buyerM.z }
     if spawnM ~= nil then
-        DispatchSmokeTest.adSpawnMarkerId  = spawnM.id
-        DispatchSmokeTest.adSpawnMarkerPos = { x = spawnM.x, y = spawnM.y, z = spawnM.z }
+        Dispatch.adSpawnMarkerId  = spawnM.id
+        Dispatch.adSpawnMarkerPos = { x = spawnM.x, y = spawnM.y, z = spawnM.z }
     end
     return true
 end
@@ -1053,17 +1089,17 @@ end
 -- doDirectSale can run without a real AIJob. doDirectLoad needs
 -- loadingNodeInfos (truck fill units) + fillTypeParameter; doDirectSale
 -- only reads collection state, the shim is a harmless fallback there.
-function DispatchSmokeTest:buildJobShim(vehicle)
+function Dispatch:buildJobShim(vehicle)
     local infos = {}
-    local fillType = DispatchSmokeTest.collectionFillType
+    local fillType = Dispatch.collectionFillType
     -- v0.6: the grain is held by the trailer (Krampe SKS), not the FH16.
     -- Search the trailer first, then the truck as a fallback (covers the
     -- legacy single-vehicle case). Stop at the first source that yields a
     -- grain-capable fill unit, so the truck's diesel/DEF units are never
     -- picked when a real grain trailer is present.
     local sources = {}
-    if DispatchSmokeTest.adTrailer ~= nil then
-        table.insert(sources, DispatchSmokeTest.adTrailer)
+    if Dispatch.adTrailer ~= nil then
+        table.insert(sources, Dispatch.adTrailer)
     end
     if vehicle ~= nil then
         table.insert(sources, vehicle)
@@ -1089,19 +1125,19 @@ function DispatchSmokeTest:buildJobShim(vehicle)
     return {
         loadingNodeInfos = infos,
         fillTypeParameter = {
-            getFillTypeIndex = function() return DispatchSmokeTest.collectionFillType end,
+            getFillTypeIndex = function() return Dispatch.collectionFillType end,
         },
         loadingStationParameter = {
-            getLoadingStation = function() return DispatchSmokeTest.collectionLoadingStation end,
+            getLoadingStation = function() return Dispatch.collectionLoadingStation end,
         },
     }
 end
 
 -- Distance from the truck to the current leg's destination marker.
-function DispatchSmokeTest:adTruckDistanceToMarker(v, leg)
+function Dispatch:adTruckDistanceToMarker(v, leg)
     if v == nil or v.rootNode == nil then return nil end
-    local pos = (leg == "to-silo") and DispatchSmokeTest.adSiloMarkerPos
-        or DispatchSmokeTest.adBuyerMarkerPos
+    local pos = (leg == "to-silo") and Dispatch.adSiloMarkerPos
+        or Dispatch.adBuyerMarkerPos
     if pos == nil then return nil end
     local ok, tx, _, tz = pcall(getWorldTranslation, v.rootNode)
     if not ok or tx == nil then return nil end
@@ -1112,7 +1148,7 @@ end
 -- player's "start" does: set DriveTo mode, set the first marker, start
 -- the mode (DriveToMode:start calls startAutoDrive itself). Returns
 -- true only if AutoDrive actually engaged (stateModule active).
-function DispatchSmokeTest:adDriveTo(vehicle, markerId, label)
+function Dispatch:adDriveTo(vehicle, markerId, label)
     local AD = GrainCollection and GrainCollection.AD or nil
     if AD == nil or vehicle == nil or vehicle.ad == nil
             or vehicle.ad.stateModule == nil then
@@ -1153,8 +1189,6 @@ function DispatchSmokeTest:adDriveTo(vehicle, markerId, label)
     end
 
     local active = sm.isActive and sm:isActive() or false
-    logf("[AD-drive] %s: started -> marker=%s, AutoDrive active=%s",
-        tostring(label), tostring(markerId), tostring(active))
     return active == true
 end
 
@@ -1164,70 +1198,57 @@ end
 -- takes corners at ~50% of AutoDrive's default cornering curve. AutoDrive
 -- already detects corners itself — this only scales them. See
 -- v0.6_AUTODRIVE_SPEED_CONTROL.md. Internal AD API: feature-detected.
-function DispatchSmokeTest:applyHaulierCornerSpeed(truck)
+function Dispatch:applyHaulierCornerSpeed(truck)
     local AD = GrainCollection and GrainCollection.AD or nil
     if AD == nil or type(AD.setSettingState) ~= "function"
             or AD.settings == nil or AD.settings.cornerSpeed == nil then
-        logf("[AD-speed] cornerSpeed setting unavailable — using AutoDrive defaults")
         return
     end
-    if truck == nil or truck.ad == nil then
-        logf("[AD-speed] no truck.ad — cannot set cornerSpeed")
-        return
-    end
-    local idx = DispatchSmokeTest.AD_CORNER_SPEED_INDEX
+    if truck == nil or truck.ad == nil then return end
+    local idx = Dispatch.AD_CORNER_SPEED_INDEX
     local ok, err = pcall(AD.setSettingState, "cornerSpeed", idx, truck)
     if not ok then
         logf("[AD-speed] setSettingState failed: %s", tostring(err))
-        return
     end
-    local val = "?"
-    if type(AD.getSetting) == "function" then
-        local okG, v = pcall(AD.getSetting, "cornerSpeed", truck)
-        if okG and v ~= nil then val = tostring(v) end
-    end
-    logf("[AD-speed] cornerSpeed set to index %d (value %s) on merchant truck", idx, val)
 end
 
-function DispatchSmokeTest:startAutoDriveTrip(vehicle)
-    DispatchSmokeTest.activeVehicle = vehicle
-    DispatchSmokeTest.adLegTruck    = vehicle
-    DispatchSmokeTest.adLeg         = nil
-    DispatchSmokeTest.adLegPollAcc  = 0
+function Dispatch:startAutoDriveTrip(vehicle)
+    Dispatch.activeVehicle = vehicle
+    Dispatch.adLegTruck    = vehicle
+    Dispatch.adLeg         = nil
+    Dispatch.adLegPollAcc  = 0
 
     -- v0.6: corner this truck at 50% (per-vehicle AutoDrive setting).
-    DispatchSmokeTest:applyHaulierCornerSpeed(vehicle)
+    Dispatch:applyHaulierCornerSpeed(vehicle)
 
-    local siloMarker = DispatchSmokeTest.adSiloMarkerId
+    local siloMarker = Dispatch.adSiloMarkerId
     if siloMarker == nil then
         logf("[AD-trip] ABORT: no silo marker matched (matchADMarkers not run?)")
-        DispatchSmokeTest.dispatchInProgress = false
-        DispatchSmokeTest:finishAutoDriveTrip(vehicle)
+        Dispatch.dispatchInProgress = false
+        Dispatch:finishAutoDriveTrip(vehicle)
         return
     end
-    logf("[AD-trip] trip %d: dispatching truck to silo marker %s",
-        DispatchSmokeTest.tripNumber, tostring(siloMarker))
     if self:adDriveTo(vehicle, siloMarker, "to-silo") then
-        DispatchSmokeTest.adLeg = "to-silo"
+        Dispatch.adLeg = "to-silo"
     else
         logf("[AD-trip] ABORT: could not start the drive to the silo")
-        DispatchSmokeTest.dispatchInProgress = false
-        DispatchSmokeTest:finishAutoDriveTrip(vehicle)
+        Dispatch.dispatchInProgress = false
+        Dispatch:finishAutoDriveTrip(vehicle)
     end
 end
 
 -- Per-frame: poll the AutoDrive leg. stateModule:isActive() is true
 -- while driving and flips false when the route ends. adDriveTo already
 -- confirmed it was true at leg start, so the first false = leg done.
-function DispatchSmokeTest:updateAutoDrive(dt)
-    local leg = DispatchSmokeTest.adLeg
+function Dispatch:updateAutoDrive(dt)
+    local leg = Dispatch.adLeg
     if leg == nil then return end
 
-    local v = DispatchSmokeTest.adLegTruck
+    local v = Dispatch.adLegTruck
     if v == nil or v.ad == nil or v.ad.stateModule == nil then
         logf("[AD-drive] truck / stateModule lost mid-leg — ending trip")
-        DispatchSmokeTest.adLeg = nil
-        DispatchSmokeTest:finishAutoDriveTrip(v)
+        Dispatch.adLeg = nil
+        Dispatch:finishAutoDriveTrip(v)
         return
     end
     local sm = v.ad.stateModule
@@ -1239,53 +1260,44 @@ function DispatchSmokeTest:updateAutoDrive(dt)
     -- The natural AD-reports-arrived path (active=false) still triggers
     -- the same finish branch for clean docks.
     local dist = self:adTruckDistanceToMarker(v, leg)
-    local radius = (leg == "to-silo") and DispatchSmokeTest.ARRIVAL_RADIUS
-                                       or DispatchSmokeTest.BUYER_ARRIVAL_RADIUS
+    local radius = (leg == "to-silo") and Dispatch.ARRIVAL_RADIUS
+                                       or Dispatch.BUYER_ARRIVAL_RADIUS
     local proximityArrived = dist ~= nil and dist <= radius
 
     if active and not proximityArrived then return end   -- still driving
 
-    if proximityArrived and active then
-        logf("[AD-drive] leg=%s proximity arrival (within %dm of marker, stopping AutoDrive)",
-            leg, radius)
-        if v.stopAutoDrive ~= nil then pcall(v.stopAutoDrive, v) end
+    if proximityArrived and active and v.stopAutoDrive ~= nil then
+        pcall(v.stopAutoDrive, v)
     end
 
-    logf("[AD-drive] leg=%s arrived (distance=%s)",
-        leg, dist and string.format("%.1fm", dist) or "?")
-
     if leg == "to-silo" then
-        DispatchSmokeTest.adLeg = nil   -- clear before re-entrant calls
+        Dispatch.adLeg = nil   -- clear before re-entrant calls
         local shim = self:buildJobShim(v)
-        logf("[AD-trip] trip %d: arrived at silo — direct-loading (%d fill unit(s))",
-            DispatchSmokeTest.tripNumber, #shim.loadingNodeInfos)
-        pcall(DispatchSmokeTest.doDirectLoad, DispatchSmokeTest, shim)
+        pcall(Dispatch.doDirectLoad, Dispatch, shim)
 
-        local buyerMarker = DispatchSmokeTest.adBuyerMarkerId
+        local buyerMarker = Dispatch.adBuyerMarkerId
         if buyerMarker ~= nil and self:adDriveTo(v, buyerMarker, "to-buyer") then
-            DispatchSmokeTest.adLeg        = "to-buyer"
-            DispatchSmokeTest.adLegPollAcc = 0
+            Dispatch.adLeg        = "to-buyer"
+            Dispatch.adLegPollAcc = 0
         else
             logf("[AD-trip] could not start the drive to the buyer — selling in place")
-            pcall(DispatchSmokeTest.doDirectSale, DispatchSmokeTest, self:buildJobShim(v))
-            DispatchSmokeTest:finishAutoDriveTrip(v)
+            pcall(Dispatch.doDirectSale, Dispatch, self:buildJobShim(v))
+            Dispatch:finishAutoDriveTrip(v)
         end
     elseif leg == "to-buyer" then
-        DispatchSmokeTest.adLeg = nil
-        logf("[AD-trip] trip %d: arrived at buyer — direct-selling",
-            DispatchSmokeTest.tripNumber)
-        pcall(DispatchSmokeTest.doDirectSale, DispatchSmokeTest, self:buildJobShim(v))
-        DispatchSmokeTest:finishAutoDriveTrip(v)
+        Dispatch.adLeg = nil
+        pcall(Dispatch.doDirectSale, Dispatch, self:buildJobShim(v))
+        Dispatch:finishAutoDriveTrip(v)
     end
 end
 
 -- End an AutoDrive trip: stop AutoDrive if still running, despawn the
 -- truck, then continue the multi-trip loop or finish the collection.
 -- Mirrors the tail of onAIJobStopped.
-function DispatchSmokeTest:finishAutoDriveTrip(truck)
-    DispatchSmokeTest.adLeg              = nil
-    DispatchSmokeTest.adLegTruck         = nil
-    DispatchSmokeTest.dispatchInProgress = false
+function Dispatch:finishAutoDriveTrip(truck)
+    Dispatch.adLeg              = nil
+    Dispatch.adLegTruck         = nil
+    Dispatch.dispatchInProgress = false
 
     if truck ~= nil then
         if truck.isServer and truck.stopAutoDrive ~= nil and truck.ad ~= nil
@@ -1296,38 +1308,50 @@ function DispatchSmokeTest:finishAutoDriveTrip(truck)
                 pcall(truck.stopAutoDrive, truck)
             end
         end
-        DispatchSmokeTest:despawnTruck(truck)
+        Dispatch:despawnTruck(truck)
     end
 
-    if DispatchSmokeTest.tripState ~= "active" then return end
+    if Dispatch.tripState ~= "active" then return end
 
-    if DispatchSmokeTest.tripSaleDone then
-        local station  = DispatchSmokeTest.collectionLoadingStation
-        local fillType = DispatchSmokeTest.collectionFillType
+    if Dispatch.tripSaleDone then
+        local station  = Dispatch.collectionLoadingStation
+        local fillType = Dispatch.collectionFillType
         local farmId   = g_currentMission and g_currentMission:getFarmId()
         local siloLevel = (station and station.getFillLevel
             and station:getFillLevel(fillType, farmId)) or 0
-        if siloLevel > 0.5 and DispatchSmokeTest.tripNumber < DispatchSmokeTest.MAX_TRIPS then
-            DispatchSmokeTest.tripState         = "between-trips"
-            DispatchSmokeTest.betweenTripsTimer = DispatchSmokeTest.BETWEEN_TRIPS_DELAY_MS
-            logf("[AD-trip] trip %d done; siloLevel=%.0fL remaining; next trip in %.0fs",
-                DispatchSmokeTest.tripNumber, siloLevel,
-                DispatchSmokeTest.BETWEEN_TRIPS_DELAY_MS / 1000)
-            -- v0.6.x UX: tell the player the collection is still running
-            -- so the gap between despawn and next spawn doesn't read as
-            -- "finished after one trip".
+        -- v0.6.x CP3: booking-driven cap — stop when delivered enough.
+        local capReached = Dispatch.collectionLitresCap ~= nil
+            and (Dispatch.collectionTotalLitres or 0)
+                >= Dispatch.collectionLitresCap
+        if siloLevel > 0.5
+                and Dispatch.tripNumber < Dispatch.MAX_TRIPS
+                and not capReached then
+            Dispatch.tripState         = "between-trips"
+            Dispatch.betweenTripsTimer = Dispatch.BETWEEN_TRIPS_DELAY_MS
+            local remainingText
+            if Dispatch.collectionLitresCap ~= nil then
+                local rem = Dispatch.collectionLitresCap
+                    - (Dispatch.collectionTotalLitres or 0)
+                remainingText = string.format("%sL of booking left", g_i18n:formatNumber(rem, 0))
+            else
+                remainingText = string.format("%sL left", g_i18n:formatNumber(siloLevel, 0))
+            end
             gcToast(string.format(
-                "Grain collection continuing — %sL left, next truck arriving shortly",
-                g_i18n:formatNumber(siloLevel, 0)), "info")
+                "Grain collection continuing — %s, next truck arriving shortly",
+                remainingText), "info")
         else
-            DispatchSmokeTest:endCollection(siloLevel <= 0.5 and "silo empty" or "MAX_TRIPS reached")
+            local reason
+            if capReached then reason = "booking fulfilled"
+            elseif siloLevel <= 0.5 then reason = "silo empty"
+            else reason = "MAX_TRIPS reached" end
+            Dispatch:endCollection(reason)
         end
     else
         logf("[AD-trip] trip %d FAILED before sale — ending collection",
-            DispatchSmokeTest.tripNumber)
-        DispatchSmokeTest:endCollection("trip failed")
+            Dispatch.tripNumber)
+        Dispatch:endCollection("trip failed")
     end
 end
 
 
-addModEventListener(DispatchSmokeTest)
+addModEventListener(Dispatch)

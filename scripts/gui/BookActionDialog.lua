@@ -51,20 +51,26 @@ function BookActionDialog:setBookData(row, callback)
     local bestValue = (row.maxPricePerLitre or 0) * (row.totalLitres or 0)
                     * (row.bestPriceScale or 1.0)
 
-    if self.btnBookNow ~= nil then
-        self.btnBookNow:setText(string.format(
-            g_i18n:getText("ui_book_now_fmt"),
-            g_i18n:formatMoney(curValue, 0, true, true)))
+    local nowText  = string.format(g_i18n:getText("ui_book_now_fmt"),
+        g_i18n:formatMoney(curValue, 0, true, true))
+    local bestText = string.format(g_i18n:getText("ui_book_best_fmt"),
+        row.bestPeriodLabel or "?",
+        g_i18n:formatMoney(bestValue, 0, true, true))
+
+    -- [RECOMMENDED] tag goes to whichever option has the higher
+    -- predicted payout. Both £0 (no buyer / no peak data) → no tag.
+    -- Tie at non-zero → BOOK NOW wins (immediate is the safe pick
+    -- when the seasonal forecast doesn't improve the outcome).
+    local tag = g_i18n:getText("ui_book_recommended_tag")
+    if bestValue > curValue and bestValue > 0 then
+        bestText = bestText .. tag
+    elseif curValue > 0 and curValue >= bestValue then
+        nowText = nowText .. tag
     end
-    if self.btnBookBest ~= nil then
-        self.btnBookBest:setText(string.format(
-            g_i18n:getText("ui_book_best_fmt"),
-            row.bestPeriodLabel or "?",
-            g_i18n:formatMoney(bestValue, 0, true, true)))
-    end
-    if self.btnCancel ~= nil then
-        self.btnCancel:setText(g_i18n:getText("ui_cancel"))
-    end
+
+    if self.btnBookNow ~= nil then self.btnBookNow:setText(nowText)   end
+    if self.btnBookBest ~= nil then self.btnBookBest:setText(bestText) end
+    if self.btnCancel  ~= nil then self.btnCancel:setText(g_i18n:getText("ui_cancel")) end
 end
 
 function BookActionDialog:onOpen()

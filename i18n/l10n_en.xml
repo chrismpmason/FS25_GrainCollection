@@ -30,12 +30,17 @@
         <!-- Book action dialog -->
         <text name="ui_book_dialog_title"   text="Book %s collection"/>
         <text name="ui_book_dialog_context" text="%s across %d silo(s)  ·  Best buyer: %s @ £%.2f/L"/>
-        <text name="ui_book_now_fmt"        text="BOOK NOW — collected this month, ~%s"/>
-        <text name="ui_book_best_fmt"       text="BOOK BEST — %s, ~%s   [RECOMMENDED]"/>
+        <text name="ui_book_now_fmt"          text="BOOK NOW — collected this month, ~%s"/>
+        <text name="ui_book_best_fmt"         text="BOOK BEST — %s, ~%s"/>
+        <text name="ui_book_recommended_tag"  text="   [RECOMMENDED]"/>
 
-        <!-- Bookings dialog -->
-        <text name="ui_bookings_title" text="Pending bookings"/>
-        <text name="ui_no_bookings"    text="No pending bookings."/>
+        <!-- Bookings dialogs -->
+        <text name="ui_bookings_title"            text="Pending bookings"/>
+        <text name="ui_no_bookings"               text="No pending bookings."/>
+        <text name="ui_pending_bookings_title"    text="Pending bookings"/>
+        <text name="ui_no_pending_bookings"       text="No pending bookings."/>
+        <text name="ui_cancel_selected_booking"   text="Cancel selected"/>
+        <text name="ui_merchant_point"            text="Merchant point"/>
 
         <!-- Notifications -->
         <text name="notify_booked"    text="Booked: %s for collection in %s. Estimated payout: %s (final price set on collection day)."/>

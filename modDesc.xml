@@ -1,24 +1,26 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="108">
     <author>Chris Mason (Hartwell Farm)</author>
-    <version>0.5.99.47</version>
+    <version>0.6.0.0</version>
     <title>
         <en>Produce Collection Service</en>
     </title>
     <iconFilename>icon_grainCollection.dds</iconFilename>
     <description>
         <en><![CDATA[
-Book a merchant haulier to collect grain directly from your on-farm silos. A truck spawns at your chosen merchant arrival point, drives to the silo, loads, drives to the best-paying buyer, sells, and despawns. Multi-trip for large silos.
+Book grain collections from your on-farm silos straight from the in-game menu. Press F7, find the grain you want sold, click BOOK. Pick Book Now or Book Best Price Month, and the mod handles the rest.
 
-REQUIRES AUTODRIVE — this mod uses your AutoDrive waypoint network for routing. Without AutoDrive installed and a waypoint network drawn on your map, the haulier cannot dispatch.
+One booking system, two presentations:
 
-How it works:
-- Press F7 to open the Produce Collection tab. One row per grain you own, sortable by price / best buyer / best month.
-- Click any row's BOOK button to dispatch the merchant. On first use you'll be asked to pick a merchant arrival point from your AutoDrive markers — choose an open spot with room for the truck to spawn and turn.
-- The merchant truck (vanilla Lizard MultiPurpose, extended cargo) handles the round trip on autopilot. Grain transfer is instant on arrival at each end — see the README for why.
-- Money lands when the truck reaches the buyer. Repeat trips run automatically until the silo is empty.
+WITHOUT AutoDrive: the booking goes in a list and settles instantly on the due in-game day. Money lands in your bank minus a 5% haulage fee, "Collection complete" banner fires.
 
-Vehicle selection (small / large / tractor + trailer) planned for v0.7.
+WITH AutoDrive (optional soft dependency): at fulfilment, a merchant truck spawns at your chosen AutoDrive marker, drives to the silo, loads, drives to the best-paying buyer, despawns. Same fee, same payout, same banner. Multi-trip for large bookings.
+
+The dialog tags whichever option pays more as RECOMMENDED — Book Now if today's price beats the forecast, Book Best Price Month if the seasonal peak is higher. The price you actually get is the buyer's real price on the day the sale settles, not the booking-time estimate.
+
+Booked grain is reserved in the menu so you can't double-book it. The View Bookings dialog lets you see and cancel pending bookings, which releases the reservation.
+
+Vehicle in AutoDrive mode is the vanilla Lizard MultiPurpose (Extension cargo, ~7,600 L). Vehicle selection (small / large / tractor + trailer combo) is planned for v0.7.
         ]]></en>
     </description>
 
@@ -30,7 +32,8 @@ Vehicle selection (small / large / tractor + trailer) planned for v0.7.
         <sourceFile filename="scripts/gui/InGameMenuProduceCollection.lua"/>
         <sourceFile filename="scripts/gui/BookActionDialog.lua"/>
         <sourceFile filename="scripts/gui/ProduceBookingsDialog.lua"/>
-        <sourceFile filename="scripts/dev/DispatchSmokeTest.lua"/>
+        <sourceFile filename="scripts/gui/PendingBookingsDialog.lua"/>
+        <sourceFile filename="scripts/Dispatch.lua"/>
     </extraSourceFiles>
 
     <!-- v0.6.x dev: merchant vehicle is the vanilla Lizard MultiPurpose

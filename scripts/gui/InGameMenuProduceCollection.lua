@@ -74,6 +74,9 @@ function InGameMenuProduceCollection:onFrameOpen()
         FocusManager:setFocus(self.stockTable)
     end
     self:logDialogState("Produce Collection tab")
+    local farmId = (g_currentMission and g_currentMission.getFarmId)
+        and g_currentMission:getFarmId() or 1
+    self:maybeNudgeAutoDriveSetup(farmId)
 end
 
 -- Show exactly one sort indicator — the one matching current sortKey/sortAsc.
@@ -181,27 +184,44 @@ function InGameMenuProduceCollection:updateFooter()
     if self.totalMaxValue     ~= nil then self.totalMaxValue:setText(g_i18n:formatMoney(totalMax, 0, true, true)) end
 end
 
--- v0.6: the former "View Bookings" button is repurposed as the merchant
--- arrival point indicator + picker entry. Its label shows the farm's
--- currently chosen AutoDrive marker (or "not set").
+-- v0.6.x: keep the two header buttons in sync with current state.
+-- View Bookings shows the pending-bookings count for the player's
+-- farm. Merchant point shows the chosen AutoDrive marker's name
+-- (or "not set").
 function InGameMenuProduceCollection:updateViewBookingsLabel()
-    if self.viewBookingsButton == nil then return end
     local farmId = (g_currentMission and g_currentMission.getFarmId)
         and g_currentMission:getFarmId() or 1
-    local name = "not set"
-    if GrainCollection.getMerchantMarker ~= nil then
-        local id = GrainCollection:getMerchantMarker(farmId)
-        if id ~= nil then
-            name = "id " .. tostring(id)
-            local ok, markers = pcall(GrainCollection.listADMarkers, GrainCollection)
-            if ok and markers ~= nil then
-                for _, m in ipairs(markers) do
-                    if m.id == id then name = m.name or name break end
+
+    if self.viewBookingsButton ~= nil then
+        local n = 0
+        for _, b in ipairs(GrainCollection.bookings or {}) do
+            if b.farmId == farmId then n = n + 1 end
+        end
+        if n > 0 then
+            self.viewBookingsButton:setText(
+                string.format(g_i18n:getText("ui_view_bookings_n"), n))
+        else
+            self.viewBookingsButton:setText(g_i18n:getText("ui_view_bookings"))
+        end
+    end
+
+    if self.merchantPointButton ~= nil then
+        local name = "not set"
+        if GrainCollection.getMerchantMarker ~= nil then
+            local id = GrainCollection:getMerchantMarker(farmId)
+            if id ~= nil then
+                name = "id " .. tostring(id)
+                local ok, markers = pcall(GrainCollection.listADMarkers, GrainCollection)
+                if ok and markers ~= nil then
+                    for _, m in ipairs(markers) do
+                        if m.id == id then name = m.name or name break end
+                    end
                 end
             end
         end
+        self.merchantPointButton:setText(
+            g_i18n:getText("ui_merchant_point") .. ": " .. name)
     end
-    self.viewBookingsButton:setText("Merchant point: " .. name)
 end
 
 -- ============================================================
@@ -227,7 +247,18 @@ function InGameMenuProduceCollection:populateCellForItemInSection(list, section,
         cell:getAttribute("grain"):setText(row.fillTypeTitle or "?")
     end
     if cell:getAttribute("volume") ~= nil then
-        cell:getAttribute("volume"):setText(formatLitres(row.totalLitres or 0))
+        local volText
+        local reservedL = row.totalReserved or 0
+        local availableL = row.totalLitres or 0
+        if reservedL > 0 and availableL == 0 then
+            volText = string.format("All booked (%s)", formatLitres(reservedL))
+        elseif reservedL > 0 then
+            volText = string.format("%s (%s booked)",
+                formatLitres(availableL), formatLitres(reservedL))
+        else
+            volText = formatLitres(availableL)
+        end
+        cell:getAttribute("volume"):setText(volText)
     end
 
     local curValue = (row.totalLitres or 0) * (row.bestBuyerPrice or 0)
@@ -285,9 +316,9 @@ function InGameMenuProduceCollection:populateCellForItemInSection(list, section,
         -- v0.6: in-progress indicator. While the merchant haulier is
         -- collecting this grain, the row shows it (refreshed on menu
         -- open / reload — not a live per-frame update).
-        if DispatchSmokeTest ~= nil and DispatchSmokeTest.tripState ~= nil
-                and DispatchSmokeTest.tripState ~= "idle"
-                and DispatchSmokeTest.collectionFillType == row.fillTypeIndex then
+        if Dispatch ~= nil and Dispatch.tripState ~= nil
+                and Dispatch.tripState ~= "idle"
+                and Dispatch.collectionFillType == row.fillTypeIndex then
             cell:getAttribute("buyer"):setText("Merchant en route...")
         end
     end
@@ -347,56 +378,64 @@ function InGameMenuProduceCollection:onListItemClicked(list, section, index)
         return
     end
 
-    -- v0.6: BOOK now dispatches the AutoDrive merchant haulier for this
-    -- row's grain — the FH16 + Krampe combo drives buyer -> silo -> buyer.
-    -- The seasonal BookActionDialog flow is superseded (its code remains
-    -- but is no longer reached). Feature-detect the haulier entry point:
-    -- if the module is absent or its API changed in a future FS25 build,
-    -- log a warning and skip rather than crash.
-    if DispatchSmokeTest == nil
-            or type(DispatchSmokeTest.startCollectionFromMenu) ~= "function" then
-        print(("[%s] ERROR: DispatchSmokeTest.startCollectionFromMenu unavailable — cannot dispatch"):format(
-            GrainCollection.MOD_NAME))
-        if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil then
-            g_currentMission:addIngameNotification(
-                FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
-                "Merchant haulier unavailable")
-        end
-        return
-    end
-
-    local pok, success, message, needsPicker = pcall(
-        DispatchSmokeTest.startCollectionFromMenu, DispatchSmokeTest, row)
-    if not pok then
-        print(("[%s] startCollectionFromMenu threw: %s"):format(
-            GrainCollection.MOD_NAME, tostring(success)))
-        success, message, needsPicker = false, "Collection dispatch failed (internal error)", false
-    end
-    GrainCollection.dbg(("BOOK dispatch: success=%s message=%s needsPicker=%s"):format(
-        tostring(success), tostring(message), tostring(needsPicker)))
-
-    -- v0.6: no merchant arrival point set yet → open the picker dialog
-    -- so the player can choose one, then click BOOK again.
-    if needsPicker then
-        if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil then
+    -- v0.6.x: row visible but already fully booked. Tell the player
+    -- they can't double-book the same grain (Option A reservation).
+    if row.bookable == false then
+        if g_currentMission and g_currentMission.addIngameNotification then
             g_currentMission:addIngameNotification(
                 FSBaseMission.INGAME_NOTIFICATION_INFO,
-                "Choose a merchant arrival point, then click BOOK again")
+                "All of this grain is already booked — cancel the booking first")
         end
-        self:openMerchantMarkerPicker()
         return
     end
 
-    if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil
-            and message ~= nil then
-        g_currentMission:addIngameNotification(
-            success and FSBaseMission.INGAME_NOTIFICATION_INFO
-                or FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
-            tostring(message))
+    -- v0.6.x unified flow: BOOK always opens the BookActionDialog
+    -- regardless of AutoDrive presence. The booking record is the same
+    -- for everyone; AutoDrive only changes presentation at fulfilment
+    -- time (truck vs instant), inside GrainCollection:processCollection.
+    -- See v0.6_UNIFIED_BOOKING_DESIGN.md.
+    self:openBookActionDialog(row)
+end
+
+-- v0.6.x: open BookActionDialog (the v0.5.0.1 3-option modal: Book Now
+-- / Book Best Month / Cancel). Selection bridges to onBookConfirmed →
+-- GrainCollection:bookCollection → processed at the due hour by
+-- hourChanged → processCollection. At fulfilment, processCollection
+-- decides instant-vs-truck based on isAutoDriveReady.
+function InGameMenuProduceCollection:openBookActionDialog(row)
+    if GrainCollection.bookActionDialog == nil or g_gui == nil then
+        print(("[%s] ERROR: BookActionDialog not registered — cannot book"):format(
+            GrainCollection.MOD_NAME))
+        return false
     end
-    if success then
-        self:reloadFromBackend()
+    local ok, dialog = pcall(g_gui.showDialog, g_gui, "BookActionDialog")
+    if not ok or dialog == nil then
+        print(("[%s] ERROR: showDialog('BookActionDialog') failed: %s"):format(
+            GrainCollection.MOD_NAME, tostring(dialog)))
+        return false
     end
+    if dialog.target ~= nil and dialog.target.setBookData ~= nil then
+        local frame = self
+        dialog.target:setBookData(row, function(choice)
+            frame:onBookConfirmed(row, choice)
+        end)
+    end
+    return true
+end
+
+-- v0.6.x: one-time-per-session info toast when AutoDrive is installed
+-- but has no waypoints drawn. Tells the player that drawing routes
+-- unlocks the Phase 2 truck-haulier experience. Silent when AD is
+-- absent (no nudge needed — Phase 1 is the only path that ever existed
+-- for them).
+function InGameMenuProduceCollection:maybeNudgeAutoDriveSetup(farmId)
+    if InGameMenuProduceCollection.adNudgeShown then return end
+    if not GrainCollection.adAvailable then return end
+    if g_currentMission == nil or g_currentMission.addIngameNotification == nil then return end
+    g_currentMission:addIngameNotification(
+        FSBaseMission.INGAME_NOTIFICATION_INFO,
+        "AutoDrive installed but no waypoints drawn — booking via the menu. Draw routes to unlock truck deliveries.")
+    InGameMenuProduceCollection.adNudgeShown = true
 end
 
 function InGameMenuProduceCollection:onBookConfirmed(row, choice)
@@ -432,11 +471,49 @@ function InGameMenuProduceCollection:onBookConfirmed(row, choice)
     end
 end
 
--- v0.6: the "Merchant point" button opens the marker picker so the
--- player can set / change the merchant arrival point at any time.
--- (XML still binds onClick="onClickViewBookings" — name kept for churn.)
+-- v0.6.x: the "View Bookings" button opens the pending-bookings list
+-- (the CP2 PendingBookingsDialog) where the player can see and cancel
+-- pending bookings.
 function InGameMenuProduceCollection:onClickViewBookings(button)
+    self:openPendingBookingsDialog()
+end
+
+-- v0.6.x: the "Merchant point" button opens the AutoDrive marker
+-- picker. Lives alongside the View Bookings button in the header.
+function InGameMenuProduceCollection:onClickMerchantPoint(button)
     self:openMerchantMarkerPicker()
+end
+
+-- Open the pending-bookings list. pcall-guarded so a GUI failure
+-- won't crash the menu. Returns true if the dialog opened.
+function InGameMenuProduceCollection:openPendingBookingsDialog()
+    if GrainCollection.pendingBookingsDialog == nil or g_gui == nil then
+        print(("[%s] ERROR: PendingBookingsDialog not registered"):format(
+            GrainCollection.MOD_NAME))
+        return false
+    end
+    local farmId = (g_currentMission and g_currentMission.getFarmId)
+        and g_currentMission:getFarmId() or 1
+    -- Filter to this farm's bookings (the dialog itself doesn't need
+    -- to know about the farm — just the records).
+    local bookings = {}
+    for _, b in ipairs(GrainCollection.bookings or {}) do
+        if b.farmId == farmId then table.insert(bookings, b) end
+    end
+    local ok, dialog = pcall(g_gui.showDialog, g_gui, "PendingBookingsDialog")
+    if not ok or dialog == nil then
+        print(("[%s] ERROR: showDialog('PendingBookingsDialog') failed: %s"):format(
+            GrainCollection.MOD_NAME, tostring(dialog)))
+        return false
+    end
+    if dialog.target ~= nil and dialog.target.setBookings ~= nil then
+        local frame = self
+        dialog.target:setBookings(bookings, function()
+            -- Cancellation released a reservation → refresh the table.
+            frame:reloadFromBackend()
+        end)
+    end
+    return true
 end
 
 -- Open the merchant-arrival-point picker (the repurposed
