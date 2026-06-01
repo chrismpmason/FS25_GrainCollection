@@ -1481,6 +1481,19 @@ function GrainCollection:processCollection(booking)
         return
     end
 
+    -- v0.9 picker-fold: per-booking "Just sell (no truck)" override.
+    -- The Vehicle picker added a 4th option that captures vehicleId=
+    -- "justsell" on the booking record; here we honour that capture
+    -- by skipping the AutoDrive truck dispatch entirely and falling
+    -- through to the instant path below — even when AutoDrive is
+    -- installed and otherwise ready. Pending bookings that captured
+    -- a real vehicle tier are unaffected.
+    local justSell = (booking.vehicleId == "justsell")
+    if justSell then
+        print(("[%s]   booking %d captured 'Just sell' → instant settle (no truck)"):format(
+            GrainCollection.MOD_NAME, booking.id))
+    end
+
     -- v0.6.x CP3 unified flow: AutoDrive is a visual layer over the
     -- shared booking system. When AD is installed and the player has a
     -- waypoint network, hand the booking to the truck dispatcher; it
@@ -1488,7 +1501,8 @@ function GrainCollection:processCollection(booking)
     -- removeBookingById on completion. Otherwise the instant path runs.
     -- Returning false here tells hourChanged to LEAVE the booking in
     -- the list (the dispatcher owns its lifecycle now).
-    if GrainCollection:isAutoDriveReady(booking.farmId)
+    if not justSell
+            and GrainCollection:isAutoDriveReady(booking.farmId)
             and Dispatch ~= nil
             and type(Dispatch.startCollectionForBooking) == "function" then
         booking.inFlight = true

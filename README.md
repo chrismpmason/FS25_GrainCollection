@@ -9,7 +9,7 @@ Two product families ship today:
 
 Works on its own — no other mods required. If you also have **AutoDrive** installed and a waypoint network drawn, the mod adds a visual layer on top of **grain** sales: a merchant truck physically drives from your set arrival point to the silo to the best-paying buyer, multi-trip if needed. With AutoDrive you also choose which **merchant vehicle** does the run — a small rigid truck, a mid-size tractor + grain trailer, or a full semi rig (see *Choosing a merchant vehicle* below). The booking, the fee, the payout — all identical to the no-AutoDrive case. AutoDrive only changes what grain fulfilment *looks* like; milk always settles instantly in this release.
 
-> **⚠ Public beta (v0.8.0.0).** Tested on Calmsden on my own save and it behaves, but the second pair of eyes are yours. Please file anything odd via [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues) — small details welcome (game version, AutoDrive version if used, map, what you did, what you saw).
+> **⚠ Public beta (v0.9.0.0).** Tested on Calmsden on my own save and it behaves, but the second pair of eyes are yours. Please file anything odd via [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues) — small details welcome (game version, AutoDrive version if used, map, what you did, what you saw).
 
 ## How it works
 
@@ -115,7 +115,7 @@ Grain is transferred directly when the truck reaches the silo (and sold directly
 [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues). Please include:
 
 - FS25 version
-- Mod version (currently 0.8.0.0)
+- Mod version (currently 0.9.0.0)
 - Whether AutoDrive is installed, and which version
 - Map
 - Other mods you have active

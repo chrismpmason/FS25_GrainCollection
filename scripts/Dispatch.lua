@@ -106,6 +106,20 @@ Dispatch.FLEET = {
         bundleXml   = "vehicles/fh16KrampeBundle.xml",
         capacity = 59400,
     },
+    -- v0.9 picker-fold: a non-vehicle option in the same picker. When
+    -- captured onto a booking, processCollection's AD branch is
+    -- skipped and the grain settles instantly (no truck spawn) even
+    -- when AutoDrive is available. Same capture-at-book + save/load
+    -- the truck tiers use. The picker's subtitle uses entry.subtitle
+    -- when present, so the capacity column shows the intent string
+    -- ("no truck — instant settle") instead of "0 L".
+    {
+        id          = "justsell",
+        displayName = "Just sell (no truck)",
+        spawnType   = "instant",
+        subtitle    = "no truck — instant settle",
+        capacity    = 0,
+    },
 }
 
 Dispatch.DEFAULT_VEHICLE_ID = "small"

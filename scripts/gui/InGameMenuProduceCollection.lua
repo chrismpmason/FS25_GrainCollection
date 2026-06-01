@@ -582,9 +582,11 @@ function InGameMenuProduceCollection:openMerchantMarkerPicker()
 end
 
 -- v0.7: open the vehicle picker. Builds the entry list from
--- Dispatch.FLEET in fixed order (small → medium → large) so the
--- list ordering stays stable regardless of Lua table iteration.
--- pcall-guarded — a GUI failure must not crash the menu.
+-- Dispatch.FLEET in fixed order (small → medium → large → justsell)
+-- so the list ordering stays stable regardless of Lua table iteration.
+-- "Just sell" sits at the bottom — it's the opt-out from the truck
+-- experience the picker normally configures. pcall-guarded — a GUI
+-- failure must not crash the menu.
 function InGameMenuProduceCollection:openVehiclePickerDialog()
     if GrainCollection.vehiclePickerDialog == nil or g_gui == nil then
         print(("[%s] ERROR: VehiclePickerDialog not registered"):format(
@@ -600,7 +602,7 @@ function InGameMenuProduceCollection:openVehiclePickerDialog()
         and g_currentMission:getFarmId() or 1
 
     local entries = {}
-    for _, id in ipairs({ "small", "medium", "large" }) do
+    for _, id in ipairs({ "small", "medium", "large", "justsell" }) do
         local e = Dispatch:getFleetEntry(id)
         if e ~= nil then table.insert(entries, e) end
     end

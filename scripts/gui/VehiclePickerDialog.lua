@@ -118,7 +118,11 @@ function VehiclePickerDialog:populateCellForItemInSection(list, section, index, 
         cell:getAttribute("title"):setText(tostring(e.displayName or e.id or "?"))
     end
     if cell:getAttribute("subtitle") ~= nil then
-        cell:getAttribute("subtitle"):setText(formatCapacity(e.capacity))
+        -- v0.9: a fleet entry may carry a literal subtitle (e.g. the
+        -- "Just sell" non-vehicle option). Vehicle tiers fall through
+        -- to the capacity format so the column still reads "N L".
+        local sub = e.subtitle or formatCapacity(e.capacity)
+        cell:getAttribute("subtitle"):setText(sub)
     end
 end
 
