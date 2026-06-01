@@ -24,12 +24,11 @@ Dispatch.dispatchInProgress = false
 Dispatch.dispatchCount      = 0
 Dispatch.activeVehicle      = nil
 
--- Merchant vehicle: vanilla Lizard MultiPurpose "Dragon" with the
--- Extension configurationSet applied. Single vehicle (no trailer) so
--- it fits universally on tight maps. ~7,600 L grain capacity. The
--- configuration indices below match the vanilla XML's Extension set
+-- v0.6 legacy single-vehicle constants. The Lizard MultiPurpose lives
+-- here so the existing beginSpawn keeps working unchanged until CP4
+-- routes it through Dispatch.FLEET. The Extension configurationSet
 -- (animation 2, cylindered 2, fillVolume 2, fillUnit 2, trailer 2,
--- dischargeable 2, tensionBelts 3). Applied via
+-- dischargeable 2, tensionBelts 3) is applied via
 -- VehicleLoadingData:setConfigurations at spawn time.
 Dispatch.VEHICLE_XML            = "data/vehicles/lizard/multiPurposeTruck/multiPurposeTruck.xml"
 Dispatch.VEHICLE_CONFIGURATIONS = {
@@ -42,13 +41,88 @@ Dispatch.VEHICLE_CONFIGURATIONS = {
     tensionBelts  = 3,
 }
 
--- v0.7: FH16+Krampe combo, reserved for the vehicle-selection feature.
--- The bundle XML stays in vehicles/ and the resolveBundleStoreItem
--- helper stays defined below, but neither is currently spawned. The
--- modDesc <storeItem> entry is commented out so the bundle does not
--- load. Restore by re-enabling the storeItem and routing beginSpawn
--- through resolveBundleStoreItem for whichever vehicle the player
--- picks.
+-- v0.7 FLEET. Three player-selectable tiers for the merchant haulier.
+-- Choice lives in GrainCollection.selectedVehicleIds (per farm, per
+-- savegame, defaults to "small" when unset so v0.6 saves are
+-- unaffected). CP4 wires beginSpawn through this table; CP1/2/3 leave
+-- the existing Lizard spawn path intact.
+--
+-- spawnType="single" → load `xml` directly + apply `configurations`
+--                      (uses g_storeManager:getItemByXMLFilename, no
+--                       <storeItem> registration needed for vanilla
+--                       data/ XMLs).
+-- spawnType="bundle" → load tractor + trailer XMLs from `tractor` /
+--                      `trailer` paths inside the bundleXml, then
+--                      attachImplement at the joint indices in
+--                      `attach`. No storeItem registration — the
+--                      dispatcher orchestrates the assembly inline.
+--                      The bundleXml in vehicles/ stays as a CONFIG
+--                      file (bundleElements + attacherInfo metadata)
+--                      the CP4 loader will read; it's NOT a registered
+--                      storeItem.
+--
+-- CP4's beginSpawn READS spawnType off the selected entry and
+-- branches. Adding a 4th tier later = one new table row + that
+-- vehicle's bundle XML, no logic change.
+--
+-- Capacities are the BULK fillUnit total grain capacity of the rig.
+-- Multi-trip math (CP4) feeds this into the per-trip cap so bigger
+-- vehicles = fewer trips automatically.
+Dispatch.FLEET = {
+    {
+        id             = "small",
+        displayName    = "Lizard MultiPurpose (Extended)",
+        spawnType      = "single",
+        xml            = "data/vehicles/lizard/multiPurposeTruck/multiPurposeTruck.xml",
+        configurations = {
+            animation     = 2,
+            cylindered    = 2,
+            fillVolume    = 2,
+            fillUnit      = 2,
+            trailer       = 2,
+            dischargeable = 2,
+            tensionBelts  = 3,
+        },
+        capacity = 7600,
+    },
+    {
+        id          = "medium",
+        displayName = "MF 9S + Brantner Z 18051",
+        spawnType   = "bundle",
+        bundleXml   = "vehicles/mf9sBrantnerBundle.xml",
+        -- Capacity = the Brantner Z 18051/2 XXL Power Flex's real BULK
+        -- fillUnit (19,600 L per vanilla XML). The original brief
+        -- planned a JCB Fastrac 8000 + 18 k trailer, but the Fastrac
+        -- 8000 is a ModHub mod (not vanilla) and the closest vanilla
+        -- bulk trailers in range are 18,500 / 19,600 L — none exactly
+        -- 18 k. MF 9S (425 hp) + Brantner Z 18051 keeps us all-vanilla
+        -- with no extra mod dependency beyond AutoDrive.
+        capacity = 19600,
+    },
+    {
+        id          = "large",
+        displayName = "Volvo FH16 + Krampe SKS 30/1050",
+        spawnType   = "bundle",
+        bundleXml   = "vehicles/fh16KrampeBundle.xml",
+        capacity = 59400,
+    },
+}
+
+Dispatch.DEFAULT_VEHICLE_ID = "small"
+
+-- Returns the fleet entry for id, or nil if unknown. Callers should
+-- fall back to DEFAULT_VEHICLE_ID on nil — the menu may be reading a
+-- stale id from a save where a tier was renamed / removed.
+function Dispatch:getFleetEntry(id)
+    if id == nil then return nil end
+    for _, entry in ipairs(Dispatch.FLEET) do
+        if entry.id == id then return entry end
+    end
+    return nil
+end
+
+-- DEAD (v0.6.x): the FH16+Krampe bundle resolver path. Kept defined
+-- below; superseded by Dispatch.FLEET at CP4. No internal callers.
 Dispatch.BUNDLE_XML_SUFFIX  = "fh16KrampeBundle.xml"
 Dispatch.BUNDLE_NAME        = "Grain Haulier (FH16 + SKS 30/1050)"
 
@@ -100,6 +174,14 @@ Dispatch.collectionLitresCap        = nil
 -- so a transient station-query failure doesn't drop the payout to £0.
 Dispatch.collectionBookingPriceEst  = nil
 
+-- v0.7 CP3: captured-vehicle id for the currently-in-flight booking.
+-- Set in startCollectionForBooking from booking.vehicleId (the value
+-- recorded at BOOK time). resolveSelectedFleetEntry reads this first
+-- so the dispatcher uses the booking's vehicle, not the current global
+-- selection — changing the GUI selector between booking and fulfilment
+-- only affects NEW bookings. Cleared in endCollection.
+Dispatch.collectionVehicleId        = nil
+
 -- AutoDrive driving state.
 Dispatch.AD_MATCH_RADIUS   = 50     -- m; max silo/buyer -> marker distance
 Dispatch.adLeg             = nil    -- nil | "to-silo" | "to-buyer"
@@ -112,6 +194,12 @@ Dispatch.adSiloMarkerPos   = nil    -- {x, z}
 Dispatch.adBuyerMarkerPos  = nil    -- {x, z}
 Dispatch.adSpawnMarkerPos  = nil    -- {x, y, z}
 Dispatch.adLegPollAcc      = 0
+
+-- v0.7: bundle-spawn rendezvous state. nil when no bundle spawn is in
+-- flight. Holds the parsed config, expected element count, and a map of
+-- per-element vehicle lists keyed by bundleElement index. Cleared when
+-- the last element's callback fires (success) or any callback fails.
+Dispatch.bundleSpawn       = nil
 
 local function logf(fmt, ...)
     print(string.format("[FS25_GrainCollection][Dispatch] " .. fmt, ...))
@@ -158,29 +246,51 @@ function Dispatch:doDirectLoad(job)
                 want = math.min(want, math.max(0, remaining))
             end
             if want > 0 then
-                -- Drain the silo FIRST; add to the truck only what the
-                -- silo actually gave up (measured by the level delta).
-                if src.removeFillLevel ~= nil then
-                    local ok, err = pcall(src.removeFillLevel, src, fillType, want, farmId)
-                    if not ok then logf("[direct-load] removeFillLevel failed: %s", tostring(err)) end
-                elseif src.setFillLevel ~= nil then
-                    local ok, err = pcall(src.setFillLevel, src, before - want, fillType)
-                    if not ok then logf("[direct-load] setFillLevel failed: %s", tostring(err)) end
-                else
-                    logf("[direct-load] grain source exposes neither removeFillLevel nor setFillLevel")
+                -- v0.7: open the trailer's cover if it has one and it's
+                -- closed. The Brantner Z 18051 (and any other covered
+                -- bulk trailer) silently rejects addFillUnitFillLevel
+                -- while the cover is shut — symptom: trailer stays at
+                -- 0 L despite the source draining. Open before fill;
+                -- leave open (no functional reason to re-close, and
+                -- the trailer despawns at trip end anyway).
+                if v.spec_cover ~= nil and v.spec_cover.hasCovers
+                        and (v.spec_cover.state or 0) == 0
+                        and type(v.setCoverState) == "function" then
+                    pcall(v.setCoverState, v, 1, true)
                 end
-                local afterSrc = (src:getFillLevel(fillType, farmId)) or 0
-                local removed  = before - afterSrc
-                local tBefore  = (v.getFillUnitFillLevel and v:getFillUnitFillLevel(fui)) or 0
-                if removed > 0 and v.addFillUnitFillLevel ~= nil then
-                    local ok, err = pcall(v.addFillUnitFillLevel, v, farmId, fui, removed, fillType, toolType, nil)
+
+                -- v0.7: ATOMIC fill-then-drain. Fill the trailer FIRST,
+                -- measure how much it actually accepted (truckDelta),
+                -- then drain the silo by exactly that amount. This
+                -- prevents grain destruction if the trailer rejects
+                -- the fill (cover closed, capacity quirk, ownerFarmId
+                -- mismatch, anything else). The old drain-first order
+                -- assumed the trailer would always accept what the
+                -- silo gave up — a false invariant once we started
+                -- handling covered trailers.
+                local tBefore = (v.getFillUnitFillLevel and v:getFillUnitFillLevel(fui)) or 0
+                if v.addFillUnitFillLevel ~= nil then
+                    local ok, err = pcall(v.addFillUnitFillLevel, v, farmId, fui, want, fillType, toolType, nil)
                     if not ok then logf("[direct-load] addFillUnitFillLevel failed: %s", tostring(err)) end
                 end
                 local tAfter = (v.getFillUnitFillLevel and v:getFillUnitFillLevel(fui)) or 0
-                -- v0.5.99.28: accumulate the authoritative amount actually
-                -- taken FROM THE SILO (the source level delta cannot be
-                -- fooled by duplicate fillUnit indices).
-                Dispatch.tripLoadedLitres = Dispatch.tripLoadedLitres + removed
+                local truckDelta = tAfter - tBefore
+
+                if truckDelta > 0 then
+                    if src.removeFillLevel ~= nil then
+                        local ok, err = pcall(src.removeFillLevel, src, fillType, truckDelta, farmId)
+                        if not ok then logf("[direct-load] removeFillLevel failed: %s", tostring(err)) end
+                    elseif src.setFillLevel ~= nil then
+                        local ok, err = pcall(src.setFillLevel, src, before - truckDelta, fillType)
+                        if not ok then logf("[direct-load] setFillLevel failed: %s", tostring(err)) end
+                    else
+                        logf("[direct-load] grain source exposes neither removeFillLevel nor setFillLevel")
+                    end
+                end
+                -- v0.5.99.28 → v0.7: accumulate the AUTHORITATIVE amount
+                -- (truckDelta, what's in the trailer), since silo and
+                -- trailer are now guaranteed equal by the atomic order.
+                Dispatch.tripLoadedLitres = Dispatch.tripLoadedLitres + truckDelta
             end
         end
     end
@@ -292,11 +402,19 @@ function Dispatch:startCollectionForBooking(booking)
     Dispatch.collectionBookingId        = booking.id
     Dispatch.collectionLitresCap        = booking.litres
     Dispatch.collectionBookingPriceEst  = booking.pricePerLitre
+    -- v0.7 CP3: thread the booking's captured vehicle into the
+    -- dispatch so resolveSelectedFleetEntry uses it instead of the
+    -- current global selection. Old bookings (pre-v0.7) have no
+    -- vehicleId — fall back to "small" so they still fulfil with the
+    -- v0.6-era Lizard rather than picking up whatever the player has
+    -- since selected globally.
+    Dispatch.collectionVehicleId        = booking.vehicleId or "small"
 
     local ok, msg = self:startCollectionFromMenu(row)
     if not ok then
-        Dispatch.collectionBookingId = nil
-        Dispatch.collectionLitresCap = nil
+        Dispatch.collectionBookingId  = nil
+        Dispatch.collectionLitresCap  = nil
+        Dispatch.collectionVehicleId  = nil
         return false, msg
     end
     return true
@@ -439,6 +557,139 @@ function Dispatch:resolveBundleStoreItem()
     return nil
 end
 
+-- v0.7: resolve the fleet entry to drive this spawn.
+-- Priority order (highest first):
+--   1. Dispatch.collectionVehicleId — set by startCollectionForBooking
+--      from booking.vehicleId. The booking's CAPTURED vehicle wins so
+--      changing the GUI selector between booking and fulfilment only
+--      affects new bookings.
+--   2. GrainCollection:getSelectedVehicleId(farmId) — the current
+--      global per-farm selection (used for direct F10 / dev paths
+--      that don't go through a booking; not reachable in v0.7
+--      production but kept as a safety net).
+--   3. Dispatch.DEFAULT_VEHICLE_ID ("small") — final fallback.
+-- If the resolved id no longer maps to a known fleet entry (e.g. a
+-- tier was renamed/removed in a later build, or an old booking
+-- carried a stale id), fall back to the default tier.
+function Dispatch:resolveSelectedFleetEntry(farmId)
+    local id = Dispatch.collectionVehicleId
+    if id == nil and GrainCollection ~= nil
+            and type(GrainCollection.getSelectedVehicleId) == "function" then
+        id = GrainCollection:getSelectedVehicleId(farmId)
+    end
+    if id == nil then id = Dispatch.DEFAULT_VEHICLE_ID end
+    local entry = self:getFleetEntry(id)
+    if entry == nil then
+        entry = self:getFleetEntry(Dispatch.DEFAULT_VEHICLE_ID)
+    end
+    return entry
+end
+
+-- v0.7: terrain Y sampling extracted out so both spawn paths share the
+-- same fallback ladder (terrain → marker Y → engine default).
+function Dispatch:resolveSpawnY(spawnX, spawnZ)
+    local markerY
+    if Dispatch.adSpawnMarkerPos ~= nil then
+        markerY = Dispatch.adSpawnMarkerPos.y
+    end
+    local terrainY
+    if g_terrainNode ~= nil then
+        local okT, ty = pcall(getTerrainHeightAtWorldPos, g_terrainNode, spawnX, 0, spawnZ)
+        if okT and type(ty) == "number" then terrainY = ty end
+    end
+    if terrainY ~= nil then
+        return terrainY + 0.1   -- small lift so the chassis doesn't clip
+    end
+    if markerY ~= nil then
+        logf("[BOOK] WARN terrain sample failed at (%.1f, %.1f) — falling back to marker Y", spawnX, spawnZ)
+        return markerY
+    end
+    logf("[BOOK] WARN terrain sample failed at (%.1f, %.1f) and no marker Y — using engine default", spawnX, spawnZ)
+    return nil
+end
+
+-- v0.7: rotate a bundleElement's local-frame offset (oX, oZ) into world
+-- coords given the puller's heading. The puller's model spawned 180°
+-- flipped per the existing convention, so its world-forward direction
+-- is (-headingDirX, -headingDirZ); the local +Z axis maps there. With
+-- typical bundle offset (0, 0, -8) meaning "8 m behind in the puller's
+-- local -Z", this produces a world position 8 m in the headingDir
+-- direction — which is the trailer's resting spot before attachImplement
+-- snaps the joint.
+function Dispatch:applyLocalOffsetToWorld(baseX, baseZ, headingDirX, headingDirZ, offsetX, offsetZ)
+    headingDirX = headingDirX or 0
+    headingDirZ = headingDirZ or 1
+    -- Local +Z world = (-headingDirX, -headingDirZ).
+    -- Local +X world = perpendicular (90° right of forward) = (-headingDirZ, headingDirX).
+    local worldDX = offsetX * (-headingDirZ) + offsetZ * (-headingDirX)
+    local worldDZ = offsetX * (headingDirX)  + offsetZ * (-headingDirZ)
+    return baseX + worldDX, baseZ + worldDZ
+end
+
+-- v0.7: parse a vec3 string ("x y z") into three numbers, defaulting to 0.
+local function parseVec3(s)
+    if s == nil then return 0, 0, 0 end
+    local x, y, z = string.match(s, "(%-?[%d%.]+)%s+(%-?[%d%.]+)%s+(%-?[%d%.]+)")
+    return tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0
+end
+
+-- v0.7: load a bundle XML config (vehicles/<name>.xml) and return:
+--   { elements = { {xmlFilename, offsetX/Y/Z, rotX/Y/Z}, ... },
+--     attach   = {elementA, elementB, attacherJointIndex, inputAttacherJointIndex} or nil }
+-- Returns nil on failure. Bundle XMLs use the same metadata schema as
+-- fh16KrampeBundle.xml (storeData.bundleElements + storeData.attacherInfo).
+function Dispatch:loadBundleConfig(fullPath)
+    local xmlFile = loadXMLFile("bundleConfig", fullPath)
+    if xmlFile == nil or xmlFile == 0 then
+        return nil
+    end
+
+    local config = { elements = {}, attach = nil }
+
+    local i = 0
+    while true do
+        local key = string.format("vehicle.storeData.bundleElements.bundleElement(%d)", i)
+        if not hasXMLProperty(xmlFile, key) then break end
+        local xmlFilename = getXMLString(xmlFile, key .. ".xmlFilename")
+        local ox, oy, oz  = parseVec3(getXMLString(xmlFile, key .. ".offset"))
+        local rx, ry, rz  = parseVec3(getXMLString(xmlFile, key .. ".rotationOffset"))
+        table.insert(config.elements, {
+            xmlFilename = xmlFilename,
+            offsetX = ox, offsetY = oy, offsetZ = oz,
+            rotX = rx, rotY = ry, rotZ = rz,
+        })
+        i = i + 1
+    end
+
+    -- v0.7: multi-attach support. Iterate every <attach> child in
+    -- attacherInfo so a bundle can wire more than one implement onto
+    -- the puller (e.g. medium tier = trailer on rear + ballast on
+    -- front 3-point). The first attach is kept on config.attach for
+    -- back-compat with any callers reading the single field.
+    config.attaches = {}
+    local ai = 0
+    while true do
+        local key = string.format("vehicle.storeData.attacherInfo.attach(%d)", ai)
+        if not hasXMLProperty(xmlFile, key) then break end
+        local one = {
+            elementA = getXMLInt(xmlFile, key .. "#bundleElement0") or 1,
+            elementB = getXMLInt(xmlFile, key .. "#bundleElement1") or 2,
+            attacherJointIndex      = getXMLInt(xmlFile, key .. "#attacherJointIndex") or 1,
+            inputAttacherJointIndex = getXMLInt(xmlFile, key .. "#inputAttacherJointIndex") or 1,
+        }
+        table.insert(config.attaches, one)
+        ai = ai + 1
+    end
+    if #config.attaches > 0 then config.attach = config.attaches[1] end
+
+    delete(xmlFile)
+    if #config.elements == 0 then return nil end
+    return config
+end
+
+-- v0.7: thin dispatcher. Reads the per-farm selected fleet entry and
+-- branches on spawnType. The actual spawn logic lives in
+-- beginSpawnSingle / beginSpawnBundle below.
 function Dispatch:beginSpawn(overrideX, overrideZ, headingDirX, headingDirZ)
     if not g_currentMission:getIsServer() then
         logf("ABORT: not server — AISystem:startJob requires isServer (line 541 of AISystem.lua)")
@@ -462,81 +713,189 @@ function Dispatch:beginSpawn(overrideX, overrideZ, headingDirX, headingDirZ)
     end
     local farmId = g_currentMission:getFarmId()
 
-    -- v0.6.x: spawn the vanilla Lizard MultiPurpose with the Extension
-    -- configurationSet (7,600 L BULK fillUnit, single vehicle, no
-    -- trailer to attach — fits on tight maps). The FH16+Krampe bundle
-    -- path stays in this file but is unreachable; v0.7 selection UI
-    -- will reintroduce it.
+    local entry = self:resolveSelectedFleetEntry(farmId)
+    if entry == nil then
+        logf("ABORT: no fleet entry resolved (fleet table empty?)")
+        return
+    end
+
+    logf("vehicle: %s (%s)",
+        tostring(entry.displayName), tostring(entry.id))
+
+    local spawnY = self:resolveSpawnY(spawnX, spawnZ)
+
+    Dispatch.dispatchInProgress = true
+
+    if entry.spawnType == "single" then
+        self:beginSpawnSingle(entry, spawnX, spawnY, spawnZ, headingDirX, headingDirZ, farmId)
+    elseif entry.spawnType == "bundle" then
+        self:beginSpawnBundle(entry, spawnX, spawnZ, headingDirX, headingDirZ, farmId)
+    else
+        Dispatch.dispatchInProgress = false
+        logf("ABORT: unknown spawnType '%s' on fleet entry '%s'",
+            tostring(entry.spawnType), tostring(entry.id))
+    end
+end
+
+-- v0.7: single-vehicle spawn (the existing v0.6 Lizard path, now driven
+-- off the fleet entry's xml + configurations rather than the hardcoded
+-- Dispatch.VEHICLE_XML / Dispatch.VEHICLE_CONFIGURATIONS. The SMALL
+-- tier's entry mirrors those constants exactly, so v0.6 saves produce
+-- identical spawn behaviour through this branch.
+function Dispatch:beginSpawnSingle(entry, spawnX, spawnY, spawnZ, headingDirX, headingDirZ, farmId)
     local data = VehicleLoadingData.new()
     local storeItem = nil
     if g_storeManager ~= nil and type(g_storeManager.getItemByXMLFilename) == "function" then
         local ok, item = pcall(g_storeManager.getItemByXMLFilename,
-            g_storeManager, Dispatch.VEHICLE_XML)
+            g_storeManager, entry.xml)
         if ok then storeItem = item end
     end
     if storeItem == nil then
-        logf("ABORT: Lizard MultiPurpose store item not found at '%s' — vanilla install missing?",
-            Dispatch.VEHICLE_XML)
+        Dispatch.dispatchInProgress = false
+        logf("ABORT: store item not found at '%s' — vanilla install missing?", tostring(entry.xml))
         gcToast("Merchant vehicle missing — cannot dispatch", "critical")
         return
     end
     data:setStoreItem(storeItem)
-    -- Extension configurationSet — adds the bodyExtension, lifts BULK
-    -- capacity from 3,500 L to 7,600 L. Per-config indices declared at
-    -- VEHICLE_CONFIGURATIONS up top.
-    if type(data.setConfigurations) == "function" then
-        data:setConfigurations(Dispatch.VEHICLE_CONFIGURATIONS)
+    if entry.configurations ~= nil and type(data.setConfigurations) == "function" then
+        data:setConfigurations(entry.configurations)
     end
     if not data.isValid then
-        logf("ABORT: VehicleLoadingData.isValid=false for Lizard MultiPurpose '%s'",
-            tostring(storeItem.name))
+        Dispatch.dispatchInProgress = false
+        logf("ABORT: VehicleLoadingData.isValid=false for '%s'", tostring(storeItem.name))
         return
     end
 
-    -- v0.6: sample actual terrain height at the spawn XZ rather than
-    -- relying on the marker's stored Y. AutoDrive waypoints record Y at
-    -- wheel/chassis height which can sit several metres off the ground,
-    -- causing a visible drop on spawn. Pcall-guarded; on failure fall
-    -- back to the marker Y (if known), otherwise nil for engine default.
-    local markerY
-    if Dispatch.adSpawnMarkerPos ~= nil then
-        markerY = Dispatch.adSpawnMarkerPos.y
-    end
-    local terrainY
-    if g_terrainNode ~= nil then
-        local okT, ty = pcall(getTerrainHeightAtWorldPos, g_terrainNode, spawnX, 0, spawnZ)
-        if okT and type(ty) == "number" then terrainY = ty end
-    end
-    local spawnY
-    if terrainY ~= nil then
-        spawnY = terrainY + 0.1   -- small lift so the chassis doesn't clip
-    elseif markerY ~= nil then
-        logf("[BOOK] WARN terrain sample failed at (%.1f, %.1f) — falling back to marker Y", spawnX, spawnZ)
-        spawnY = markerY
-    else
-        logf("[BOOK] WARN terrain sample failed at (%.1f, %.1f) and no marker Y — using engine default", spawnX, spawnZ)
-    end
-
     data:setPosition(spawnX, spawnY, spawnZ)
-    -- v0.5.99.29: face the truck along the heading. yaw rotates around
-    -- Y, forward = (sin(ry), cos(ry)), so ry = atan2(dirX, dirZ).
-    -- v0.5.99.31: the truck spawned 180° opposite the player's F9
-    -- facing (the player capture round-trips ry cleanly, so the flip
-    -- is a coordinate-system quirk — player-character forward sign or
-    -- the truck model's forward axis). Negate the heading to correct
-    -- it. The [pickup] (capture) and [trip] (spawn) log lines record
-    -- the raw values either side of the conversion for confirmation.
     if headingDirX ~= nil and headingDirZ ~= nil and data.setRotation ~= nil then
         local hx, hz = -headingDirX, -headingDirZ
-        local ry = math.atan2(hx, hz)
-        data:setRotation(0, ry, 0)
+        data:setRotation(0, math.atan2(hx, hz), 0)
     end
     data:setPropertyState(VehiclePropertyState.MISSION)
     data:setOwnerFarmId(farmId)
     data:setIsSaved(false)
-
-    Dispatch.dispatchInProgress = true
     data:load(Dispatch.onSpawned, Dispatch, nil)
+end
+
+-- v0.7: bundle spawn. Reads the bundle config XML, spawns each element
+-- at its offset-rotated world position, then waits for ALL callbacks to
+-- arrive before calling attachImplement and handing the merged vehicle
+-- list to the existing onSpawned. Async coordination uses
+-- Dispatch.bundleSpawn as the rendezvous state.
+function Dispatch:beginSpawnBundle(entry, spawnX, spawnZ, headingDirX, headingDirZ, farmId)
+    local modDir = (GrainCollection and GrainCollection.MOD_DIR) or g_currentModDirectory or ""
+    local fullPath = modDir .. entry.bundleXml
+    local config = self:loadBundleConfig(fullPath)
+    if config == nil then
+        Dispatch.dispatchInProgress = false
+        logf("ABORT: failed to load bundle config '%s'", fullPath)
+        gcToast("Merchant bundle config missing — cannot dispatch", "critical")
+        return
+    end
+
+    local yaw
+    if headingDirX ~= nil and headingDirZ ~= nil then
+        yaw = math.atan2(-headingDirX, -headingDirZ)
+    end
+
+    Dispatch.bundleSpawn = {
+        entry    = entry,
+        config   = config,
+        farmId   = farmId,
+        yaw      = yaw,
+        received = {},
+        expected = #config.elements,
+    }
+
+    for i, elem in ipairs(config.elements) do
+        local elemX, elemZ = self:applyLocalOffsetToWorld(
+            spawnX, spawnZ, headingDirX, headingDirZ,
+            elem.offsetX or 0, elem.offsetZ or 0)
+        local elemY = self:resolveSpawnY(elemX, elemZ)
+
+        local data = VehicleLoadingData.new()
+        data:setFilename(elem.xmlFilename)
+        if not data.isValid then
+            Dispatch.dispatchInProgress = false
+            Dispatch.bundleSpawn = nil
+            logf("ABORT: bundle element %d isValid=false (xml='%s')",
+                i, tostring(elem.xmlFilename))
+            return
+        end
+        data:setPosition(elemX, elemY, elemZ)
+        if yaw ~= nil and data.setRotation ~= nil then
+            data:setRotation(0, yaw, 0)
+        end
+        data:setPropertyState(VehiclePropertyState.MISSION)
+        data:setOwnerFarmId(farmId)
+        data:setIsSaved(false)
+        data:load(Dispatch.onBundleElementSpawned, Dispatch, { index = i })
+    end
+end
+
+-- v0.7: per-element bundle spawn callback. Buffers each element's
+-- spawned vehicles into Dispatch.bundleSpawn.received and waits for the
+-- last one to arrive before attaching + handing off to onSpawned.
+function Dispatch:onBundleElementSpawned(vehicles, loadState, args)
+    local bundle = Dispatch.bundleSpawn
+    if bundle == nil then return end   -- stale / state cleared after error
+
+    local okState = (VehicleLoadingState ~= nil) and (loadState == VehicleLoadingState.OK)
+    local idx = (args and args.index) or 0
+    if not okState or vehicles == nil or #vehicles == 0 then
+        Dispatch.bundleSpawn = nil
+        Dispatch.dispatchInProgress = false
+        logf("ABORT: bundle element %d spawn failed (loadState=%s vehicles=%d)",
+            idx, tostring(loadState), vehicles and #vehicles or 0)
+        return
+    end
+
+    bundle.received[idx] = vehicles
+
+    local nReceived = 0
+    for _ in pairs(bundle.received) do nReceived = nReceived + 1 end
+    if nReceived < bundle.expected then return end
+
+    -- All elements landed. Flatten to a single vehicle list (puller first).
+    local allVehicles = {}
+    for i = 1, bundle.expected do
+        for _, v in ipairs(bundle.received[i] or {}) do
+            table.insert(allVehicles, v)
+        end
+    end
+
+    -- attachImplement: puller (bundleElement0) carries the attacher
+    -- joint; the implement (bundleElement1) carries the input joint.
+    -- v0.7: iterate config.attaches to support multiple implements on
+    -- the same puller (e.g. trailer on rear + front-3pt ballast).
+    -- Engine snaps each pair together regardless of small spawn offset.
+    local attaches = bundle.config.attaches
+    if attaches == nil and bundle.config.attach ~= nil then
+        attaches = { bundle.config.attach }
+    end
+    if attaches ~= nil then
+        for ai, attach in ipairs(attaches) do
+            local pullerList     = bundle.received[attach.elementA]
+            local attachableList = bundle.received[attach.elementB]
+            local puller     = pullerList and pullerList[1]
+            local attachable = attachableList and attachableList[1]
+            if puller ~= nil and attachable ~= nil
+                    and type(puller.attachImplement) == "function" then
+                local ok, err = pcall(puller.attachImplement, puller, attachable,
+                    attach.inputAttacherJointIndex, attach.attacherJointIndex)
+                if not ok then
+                    logf("WARNING: attachImplement #%d failed: %s", ai, tostring(err))
+                end
+            else
+                logf("WARNING: bundle attach #%d skipped — puller=%s attachable=%s attachImplement=%s",
+                    ai, tostring(puller ~= nil), tostring(attachable ~= nil),
+                    tostring(puller and type(puller.attachImplement) == "function"))
+            end
+        end
+    end
+
+    Dispatch.bundleSpawn = nil
+    Dispatch:onSpawned(allVehicles, VehicleLoadingState.OK, nil)
 end
 
 function Dispatch:onSpawned(vehicles, loadState, args)
@@ -565,13 +924,23 @@ function Dispatch:onSpawned(vehicles, loadState, args)
     local vehicle = truck or vehicles[1]
     Dispatch.adTrailer = trailer
 
-    -- v0.6.x: capacity check is layout-agnostic. The Lizard MultiPurpose
-    -- is a rigid truck — grain rides on its own bed, no trailer needed.
-    -- A tractor + trailer combo (reserved for v0.7) puts grain on the
-    -- trailer. Either is fine; what matters is that SOMETHING in the
-    -- bundle has a fillUnit that can hold the booked grain. Only warn
-    -- when no vehicle in the bundle can carry it (e.g. wrong storeItem
-    -- registered). Mirrors buildJobShim's source-resolution logic.
+    -- v0.7 CP5 despawn-hardening: remember the ENTIRE spawned vehicle
+    -- list, not just truck + trailer. The original despawn path only
+    -- knew about adTrailer + the truck root, which leaks any bundle
+    -- element beyond two (e.g. front weights, second trailers). This
+    -- list is the authoritative cleanup target — despawnTruck walks it
+    -- before unsetting the per-trip state.
+    Dispatch.bundleVehicles = {}
+    for _, vh in ipairs(vehicles) do
+        if vh ~= nil then table.insert(Dispatch.bundleVehicles, vh) end
+    end
+
+    -- Capacity check is layout-agnostic. The Lizard MultiPurpose is a
+    -- rigid truck — grain rides on its own bed, no trailer needed. A
+    -- tractor + trailer combo puts grain on the trailer. Either is
+    -- fine; what matters is that SOMETHING in the bundle has a
+    -- fillUnit that can hold the booked grain. Only warn when no
+    -- vehicle in the bundle can carry it (e.g. wrong storeItem).
     local fillType = Dispatch.collectionFillType
     local grainCapable = false
     for _, v in ipairs(vehicles) do
@@ -579,14 +948,12 @@ function Dispatch:onSpawned(vehicles, loadState, args)
             local okU, fillUnits = pcall(v.getFillUnits, v)
             if okU and fillUnits ~= nil then
                 for _, fu in ipairs(fillUnits) do
-                    if (fu.capacity or 0) > 0 then
-                        local supports = fu.supportedFillTypes == nil
-                            or fillType == nil
-                            or fu.supportedFillTypes[fillType]
-                        if supports then
-                            grainCapable = true
-                            break
-                        end
+                    local supports = fu.supportedFillTypes == nil
+                        or fillType == nil
+                        or fu.supportedFillTypes[fillType]
+                    if (fu.capacity or 0) > 0 and supports then
+                        grainCapable = true
+                        break
                     end
                 end
             end
@@ -853,9 +1220,11 @@ function Dispatch:endCollection(reason)
     Dispatch.collectionBookingId        = nil
     Dispatch.collectionLitresCap        = nil
     Dispatch.collectionBookingPriceEst  = nil
+    Dispatch.collectionVehicleId        = nil
     Dispatch.adLeg                      = nil
     Dispatch.adLegTruck                 = nil
     Dispatch.adTrailer                  = nil
+    Dispatch.bundleVehicles             = nil
     Dispatch.adSiloMarkerId             = nil
     Dispatch.adBuyerMarkerId            = nil
     Dispatch.adSpawnMarkerId            = nil
@@ -903,29 +1272,57 @@ function Dispatch:startNextTrip()
 end
 
 -- v0.5.99.27: despawn the truck once it has returned to DESPAWN_POINT.
+-- v0.7 CP5: walk Dispatch.bundleVehicles (the full spawned list) so
+-- any third-or-later element — front weights, secondary trailers,
+-- whatever a future bundle adds — gets deleted instead of orphaned in
+-- the world. Falls back to the legacy adTrailer + v path when
+-- bundleVehicles is unset (single-vehicle spawn, or pre-v0.7 saves
+-- where the list wasn't recorded).
 function Dispatch:despawnTruck(v)
-    -- v0.6: the merchant vehicle is a combo — delete the trailer too.
-    -- Delete the implement before the root; Vehicle:delete detaches it.
-    local trailer = Dispatch.adTrailer
-    if trailer ~= nil and trailer ~= v and type(trailer.delete) == "function" then
-        local ok, err = pcall(trailer.delete, trailer)
+    local deleted = {}
+    local function tryDelete(label, vh)
+        if vh == nil then return end
+        if deleted[vh] then return end
+        deleted[vh] = true
+        if type(vh.delete) ~= "function" then
+            logf("[trip %d] %s has no :delete() — cannot despawn",
+                Dispatch.tripNumber, label)
+            return
+        end
+        local ok, err = pcall(vh.delete, vh)
         if not ok then
-            logf("[trip %d] trailer delete failed: %s", Dispatch.tripNumber, tostring(err))
+            logf("[trip %d] %s delete failed: %s",
+                Dispatch.tripNumber, label, tostring(err))
         end
     end
-    Dispatch.adTrailer = nil
 
-    if v == nil then
-        logf("[trip %d] despawnTruck: no vehicle", Dispatch.tripNumber)
-        return
-    end
-    if type(v.delete) == "function" then
-        local ok, err = pcall(v.delete, v)
-        if not ok then
-            logf("[trip %d] truck delete failed: %s", Dispatch.tripNumber, tostring(err))
+    -- Detach order matters: delete IMPLEMENTS (anything attached to
+    -- the puller) before the puller itself, so Vehicle:delete on the
+    -- implement runs detachImplement cleanly. Truck/puller goes last.
+    if Dispatch.bundleVehicles ~= nil and #Dispatch.bundleVehicles > 0 then
+        local n = #Dispatch.bundleVehicles
+        for i = n, 2, -1 do
+            tryDelete("bundle element " .. i, Dispatch.bundleVehicles[i])
         end
+        tryDelete("bundle element 1 (puller)", Dispatch.bundleVehicles[1])
     else
-        logf("[trip %d] truck has no :delete() — cannot despawn", Dispatch.tripNumber)
+        -- Legacy path — single-vehicle spawn, or trailer+truck without
+        -- a recorded bundle list. Mirror the original v0.6 behaviour.
+        tryDelete("trailer", Dispatch.adTrailer)
+    end
+
+    -- Catch-all: any vehicle reference still held in Dispatch state
+    -- that wasn't part of bundleVehicles. Belt-and-braces — covers
+    -- migration windows where adTrailer is set but bundleVehicles is
+    -- nil, or v is a vehicle the spawn list missed.
+    tryDelete("adTrailer (catch-all)", Dispatch.adTrailer)
+    tryDelete("dispatch root vehicle", v)
+
+    Dispatch.adTrailer       = nil
+    Dispatch.bundleVehicles  = nil
+
+    if v == nil and (Dispatch.bundleVehicles == nil or #Dispatch.bundleVehicles == 0) then
+        logf("[trip %d] despawnTruck: no vehicle", Dispatch.tripNumber)
     end
 end
 

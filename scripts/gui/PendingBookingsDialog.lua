@@ -127,8 +127,24 @@ function PendingBookingsDialog:populateCellForItemInSection(list, section, index
             pay = string.format(" · ~%s",
                 g_i18n:formatMoney(b.totalNet, 0, true, true))
         end
+        -- v0.7 CP3d: show the captured vehicle so the player can see
+        -- which truck will be sent for each booking. Pre-v0.7 saves
+        -- have b.vehicleId == nil → defaulted to "small" at fulfilment;
+        -- match that display here so the dialog and Dispatch agree.
+        local veh = ""
+        local vehicleId = b.vehicleId
+        if vehicleId == nil and Dispatch ~= nil and Dispatch.DEFAULT_VEHICLE_ID ~= nil then
+            vehicleId = Dispatch.DEFAULT_VEHICLE_ID
+        end
+        if vehicleId ~= nil and Dispatch ~= nil and Dispatch.getFleetEntry ~= nil then
+            local entry = Dispatch:getFleetEntry(vehicleId)
+            if entry ~= nil then
+                veh = string.format(g_i18n:getText("ui_vehicle_booked_fmt"),
+                    tostring(entry.displayName or entry.id or vehicleId))
+            end
+        end
         cell:getAttribute("subtitle"):setText(
-            string.format("Due: %s · Buyer: %s%s", month, buyer, pay))
+            string.format("Due: %s · Buyer: %s%s%s", month, buyer, pay, veh))
     end
 end
 

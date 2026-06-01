@@ -2,9 +2,9 @@
 
 A small Farming Simulator 25 mod that lets you book grain collections from your on-farm silos straight from the in-game menu. Click BOOK on a grain row, pick *Book Now* or *Book Best Price Month*, and the mod handles the rest. A 5% haulage fee comes off the sale price (same as the buyer-truck system the in-game economy already models).
 
-Works on its own — no other mods required. If you also have **AutoDrive** installed and a waypoint network drawn, the mod adds a visual layer on top: a merchant truck physically drives from your set arrival point to the silo to the best-paying buyer, multi-trip if needed. The booking, the fee, the payout — all identical to the no-AutoDrive case. AutoDrive only changes what fulfilment *looks* like.
+Works on its own — no other mods required. If you also have **AutoDrive** installed and a waypoint network drawn, the mod adds a visual layer on top: a merchant truck physically drives from your set arrival point to the silo to the best-paying buyer, multi-trip if needed. With AutoDrive you also choose which **merchant vehicle** does the run — a small rigid truck, a mid-size tractor + grain trailer, or a full semi rig (see *Choosing a merchant vehicle* below). The booking, the fee, the payout — all identical to the no-AutoDrive case. AutoDrive only changes what fulfilment *looks* like.
 
-> **⚠ Public beta (v0.6.0.0).** First release out in the wild. Tested across Calmsden and Dahiem on my own save and it behaves, but the second pair of eyes are yours. Please file anything odd via [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues) — small details welcome (game version, AutoDrive version if used, map, what you did, what you saw).
+> **⚠ Public beta (v0.7.0.0).** Tested on Calmsden on my own save and it behaves, but the second pair of eyes are yours. Please file anything odd via [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues) — small details welcome (game version, AutoDrive version if used, map, what you did, what you saw).
 
 ## How it works
 
@@ -48,17 +48,34 @@ The **Merchant point** button at the top right opens a picker listing your AutoD
 
 That's the only one-time setup. After that the mod automatically picks the AutoDrive marker nearest each silo and each buyer at fulfilment time, so adding new silos or buyers doesn't need any reconfiguration on this side.
 
+### Choosing a merchant vehicle
+
+The **Vehicle** button at the top of the Produce Collection menu (only visible when AutoDrive is installed) opens a picker with three vanilla tiers:
+
+| Tier | Vehicle | Capacity | Trips for a 54,000 L booking |
+|------|---------|----------|------------------------------|
+| Small | Lizard MultiPurpose (Extension) | 7,600 L | ~8 |
+| Medium | Massey Ferguson 9S + Brantner Z 18051 | 19,600 L | 3 |
+| Large | Volvo FH16 + Krampe SKS 30/1050 | ~59,400 L | 1 |
+
+All three are base-game vehicles — no mod dependencies. The choice is saved per-savegame.
+
+**The vehicle is captured when you BOOK.** Switching the picker afterwards only affects bookings made *from that point on*; any pending booking keeps the vehicle it was booked with. The pending-bookings list shows each booking's captured vehicle so there's no guessing. So if you book a large delivery on the Krampe and then drop the picker back to the Lizard for the next one, the Krampe still does the booked run.
+
+Without AutoDrive there's no truck — bookings settle instantly and the picker has no effect (it's hidden).
+
 ### Merchant arrival marker placement
 
-Pick a spot with enough open space for the merchant vehicle to spawn cleanly. For v0.6 the mod uses a single vanilla **Lizard MultiPurpose (Extension)** truck — about 6 metres long, 7,600 L grain capacity. Vehicle selection (small / large / tractor + trailer) is on the v0.7 roadmap; for now the Lizard is fixed for universal map compatibility.
+Pick a spot with enough open space for whichever merchant vehicle tier you're using. The small Lizard is ~6 m and forgiving — even tight yard markers usually work. The medium tractor + trailer combo is ~13 m and the large FH16 + Krampe semi is ~17 m; both need open road clearance and turning room on the AutoDrive route between spawn point, silo, and buyer.
 
-Open fields, road junctions, and the entrance to your farm yard all work fine. Even tight yard markers are usually OK at this size. Things to still avoid:
-- Inside buildings (the truck spawns at the marker position — it can't pass through walls)
+Open fields, road junctions, and the entrance to your farm yard all work fine for the small rig. For the medium and large rigs, give them somewhere a real-world articulated truck could pull in and out of cleanly. Things to avoid at any tier:
+- Inside buildings (the vehicle spawns at the marker position — it can't pass through walls)
 - Directly on top of fences, hedges, or other physics objects
+- Tight roads where the trailer's swept path would clip terrain (medium and large especially)
 
-If the truck gets stuck during a journey, that's an AutoDrive routing issue — adjust your AutoDrive waypoints so the route works for the vehicle. The mod just hands AutoDrive your spawn marker and destination marker; AutoDrive does the actual driving.
+If the rig gets stuck during a journey, that's an AutoDrive routing issue — adjust your AutoDrive waypoints so the route works for the vehicle you've selected, or pick a smaller tier. The mod just hands AutoDrive your spawn marker and destination marker; AutoDrive does the actual driving.
 
-> **Capacity vs booking size:** the Lizard's 7,600 L hold is small relative to a full silo, so a large booking runs as several back-to-back trips between the silo and the buyer (about 8 seconds between despawn and the next spawn). The booking pays once at the end for the whole booked amount — you don't get partial payments per trip. v0.7 will let you pick a larger combo (FH16 + Krampe-style semitrailer, ~59,000 L) when your AutoDrive network has the turning room for it.
+> **Capacity vs booking size:** bigger tier = fewer trips. A 54,000 L booking runs as ~8 round trips on the small Lizard, 3 on the medium, 1 on the large (about 8 seconds between despawn and the next spawn when multi-trip). The booking pays once at the end for the whole booked amount — no partial payments per trip — so the only practical difference is wall-clock time and how much turning room your AutoDrive network has for the bigger rigs.
 
 ### Buyer marker placement
 
@@ -76,11 +93,11 @@ Grain is transferred directly when the truck reaches the silo (and sold directly
 - **Realistic Livestock**, **Red Tape**, other husbandry mods — no conflict. Husbandry mods touch animal placeables; this mod only touches grain silos (and, when present, the AutoDrive driving controller).
 - **Other AutoDrive-using mods** (Courseplay, etc.) — should coexist. The merchant truck is a transient AI-spawned vehicle, not one of your fleet, so it doesn't compete with player AutoDrive routes.
 - **Multiplayer** — modDesc declares MP supported, but I've only tested singleplayer. Treat MP as alpha until someone runs a dedicated session.
-- **Map compatibility** — anywhere FS25 runs. AutoDrive mode is tested on Calmsden and Dahiem.
+- **Map compatibility** — anywhere FS25 runs. AutoDrive mode is tested on Calmsden.
 
 ## Known issues / things to keep an eye on
 
-- (AutoDrive mode) The truck respects your AutoDrive routing. If a route segment can't physically fit the Lizard MultiPurpose (rare at ~6 m, but possible), the truck will wedge — AutoDrive's responsibility, not the mod's. Fix it by adjusting the AutoDrive waypoints around the trouble spot.
+- (AutoDrive mode) The truck respects your AutoDrive routing. If a route segment can't physically fit the selected merchant vehicle, the rig will wedge — AutoDrive's responsibility, not the mod's. Fix it by adjusting the AutoDrive waypoints around the trouble spot, or pick a smaller tier from the Vehicle button.
 - (AutoDrive mode) If the best buyer's nearest AutoDrive marker is on the wrong side of an obstacle, the truck will "arrive" without physically reaching the bay (see Buyer marker placement above). Move or add a marker to fix.
 - (AutoDrive mode) Multi-trip cycles back automatically. Between despawn and the next spawn there's an 8-second pause — you'll see a blue notification "Grain collection continuing — XL of booking left, next truck arriving shortly" confirming it's still running.
 - (Both modes) Reservation is a soft lock — it stops you double-booking the same grain through this menu, but it doesn't physically prevent you from driving a tractor up to the silo and emptying it yourself. If you empty a booked silo before fulfilment, the booking will settle for whatever's actually left.
@@ -91,14 +108,14 @@ Grain is transferred directly when the truck reaches the silo (and sold directly
 [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues). Please include:
 
 - FS25 version
-- Mod version (currently 0.6.0.0)
+- Mod version (currently 0.7.0.0)
 - Whether AutoDrive is installed, and which version
 - Map
 - Other mods you have active
 - The relevant lines from `log.txt` (filter for `[FS25_GrainCollection]`)
 - What you expected vs. what happened
 
-Feature requests welcome — vehicle selection (small / large / tractor + trailer combo) is the v0.7 headline, and per-buyer marker overrides are on the list after that.
+Feature requests welcome — per-buyer marker overrides and additional vehicle tiers are on the list.
 
 ## License
 

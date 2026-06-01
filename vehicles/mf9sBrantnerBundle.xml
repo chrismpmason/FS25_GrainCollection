@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<!--
+    v0.7 medium-tier merchant vehicle.
+    A bundle pairing the vanilla Massey Ferguson 9S (425 hp) with the
+    vanilla Brantner Z 18051/2 XXL Power Flex bulk trailer
+    (~19,600 L grain, BULK fillType). Trailer hitches to the tractor's
+    standard "trailer" attacher joint; both ship in base-game FS25
+    so no extra mod dependency is required (beyond AutoDrive).
+
+    NOT registered as a <storeItem> in modDesc. The dispatcher reads
+    this file directly at fulfilment, spawns each bundleElement via
+    VehicleLoadingData:setFilename, and calls attachImplement using
+    the joint indices in attacherInfo. Bundle XML schema mirrors the
+    fh16KrampeBundle.xml metadata layout.
+-->
+<vehicle xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="$data/shared/xml/schema/vehicle.xsd">
+    <storeData>
+        <name>Grain Haulier (MF 9S + Brantner Z 18051)</name>
+        <specs>
+            <combination filterCategory="tractors"/>
+        </specs>
+        <functions>
+            <function>$l10n_function_tractor</function>
+        </functions>
+        <image>$data/vehicles/masseyFerguson/series9S/store_series9S.dds</image>
+        <bundleElements>
+            <!-- Paths use the bare "data/..." form (not "$data/..."). The
+                 "$data/" prefix is only resolved when this bundle is loaded
+                 as a registered <storeItem>; the v0.7 dispatcher reads the
+                 bundle XML directly and feeds each xmlFilename to
+                 VehicleLoadingData:setFilename, which looks up by the
+                 storeManager key — that key is the substituted "data/..."
+                 form. Same pattern the v0.6 SMALL tier uses for the Lizard. -->
+            <bundleElement>
+                <xmlFilename>data/vehicles/masseyFerguson/series9S/series9S.xml</xmlFilename>
+                <offset>0 0 0</offset>
+                <rotationOffset>0 0 0</rotationOffset>
+            </bundleElement>
+            <bundleElement>
+                <xmlFilename>data/vehicles/brantner/z18051/z18051.xml</xmlFilename>
+                <offset>0 0 -8</offset>
+                <rotationOffset>0 0 0</rotationOffset>
+            </bundleElement>
+        </bundleElements>
+        <attacherInfo>
+            <!-- MF 9S attacherJoints in XML declaration order:
+                 #1 attacherJointBack           — REAR 3-point implement (rigid lift arms)
+                 #2 attacherJointFront          — FRONT 3-point implement (rigid lift arms)
+                 #3 trailerAttacherJointBack    — REAR drawbar, jointType="trailer"     (pivoting)
+                 #4 trailerAttacherJointBackLow — REAR low drawbar, jointType="trailerLow"
+                 #5 trailerAttacherJointFront   — FRONT drawbar, jointType="trailer"
+
+                 MF 9S #3 (rear pivoting drawbar) ← Brantner Z 18051
+                 input #1 (jointType="trailer"). Earlier wiring used
+                 joint #1 (rear 3-point) which rigidly locked the
+                 trailer to the lift arms and killed steering. -->
+            <attach bundleElement0="1" bundleElement1="2" attacherJointIndex="3" inputAttacherJointIndex="1"/>
+        </attacherInfo>
+        <brand>MASSEYFERGUSON</brand>
+        <rotation>0</rotation>
+        <category>tractors</category>
+    </storeData>
+</vehicle>

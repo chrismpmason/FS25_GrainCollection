@@ -23,6 +23,12 @@
                     position="-540px 0px"
                     text="$l10n_ui_merchant_point"
                     onClick="onClickMerchantPoint"/>
+            <!-- v0.7: vehicle selector. AD-gated — updateViewBookingsLabel
+                 hides this when GrainCollection.adAvailable is false. -->
+            <Button profile="gc_viewBookingsButton" id="vehicleButton"
+                    position="-770px 0px"
+                    text="$l10n_ui_vehicle"
+                    onClick="onClickVehicle"/>
         </GuiElement>
 
         <!-- Sortable column headers. Sort-indicator Bitmaps default to

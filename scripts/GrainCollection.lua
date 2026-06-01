@@ -49,6 +49,14 @@ GrainCollection.pickupLocations = {}
 -- by the player from the marker-picker dialog; persisted in the savegame.
 GrainCollection.merchantMarkers = {}
 
+-- v0.7: per-farm merchant vehicle choice (small / medium / large). The
+-- table maps farmId -> Dispatch.FLEET[].id. Unset farms fall back to
+-- Dispatch.DEFAULT_VEHICLE_ID at read time, so v0.6 savegames without
+-- this field behave identically to v0.6 (default = "small" = Lizard).
+-- Persisted alongside merchantMarkers; AutoDrive-only feature (the
+-- instant fulfilment path doesn't spawn a truck).
+GrainCollection.selectedVehicleIds = {}
+
 -- v0.4.1: consistent uppercase-L volume formatting. FS25's formatVolume
 -- varies between 'l' and 'L' depending on overload; we sidestep it.
 local function formatLitres(n)
@@ -459,6 +467,14 @@ function GrainCollection:registerGui()
         g_gui:loadGui(modDir .. "gui/PendingBookingsDialog.xml",
             "PendingBookingsDialog", pendingDialog)
         GrainCollection.pendingBookingsDialog = pendingDialog
+    end)
+
+    -- v0.7 Modal: fleet vehicle picker (small / medium / large).
+    pcall(function()
+        local vehicleDialog = VehiclePickerDialog.new(g_i18n)
+        g_gui:loadGui(modDir .. "gui/VehiclePickerDialog.xml",
+            "VehiclePickerDialog", vehicleDialog)
+        GrainCollection.vehiclePickerDialog = vehicleDialog
     end)
 
     -- Splice the main tab into the in-game menu's paging element just
@@ -1191,6 +1207,16 @@ function GrainCollection:bookCollection(farmId, aggregate, sellPoint, leadDays, 
     local quote = self:calculateQuote(
         aggregate.fillTypeIndex, aggregate.totalLitres, sellPoint.pricePerLitre)
 
+    -- v0.7 CP3: snapshot the player's current global vehicle choice
+    -- onto the booking. The dispatcher reads booking.vehicleId at
+    -- fulfilment (not the live global), so changing the GUI selector
+    -- between booking and fulfilment only affects NEW bookings; a
+    -- booking already in flight keeps the vehicle it was booked with.
+    local capturedVehicleId
+    if type(GrainCollection.getSelectedVehicleId) == "function" then
+        capturedVehicleId = GrainCollection:getSelectedVehicleId(farmId)
+    end
+
     local booking = {
         id                   = GrainCollection.nextId,
         farmId               = farmId,
@@ -1201,6 +1227,7 @@ function GrainCollection:bookCollection(farmId, aggregate, sellPoint, leadDays, 
         totalNet             = quote.net,
         unloadingStationName = sellPoint.name,
         targetMonthLabel     = monthLabel or "",
+        vehicleId            = capturedVehicleId,
     }
     GrainCollection.nextId = GrainCollection.nextId + 1
     table.insert(GrainCollection.bookings, booking)
@@ -1476,6 +1503,39 @@ function GrainCollection:getMerchantMarker(farmId)
     return GrainCollection.merchantMarkers[farmId]
 end
 
+-- v0.7: per-farm merchant vehicle id. Validates against Dispatch.FLEET
+-- so a typo or a renamed/removed tier can't be persisted, and falls
+-- back to the default if Dispatch isn't loaded yet.
+function GrainCollection:setSelectedVehicleId(farmId, vehicleId)
+    if farmId == nil then return false end
+    if Dispatch == nil or type(Dispatch.getFleetEntry) ~= "function" then
+        return false
+    end
+    if Dispatch:getFleetEntry(vehicleId) == nil then
+        print(("[%s] setSelectedVehicleId: unknown vehicle id '%s' — ignored"):format(
+            GrainCollection.MOD_NAME, tostring(vehicleId)))
+        return false
+    end
+    GrainCollection.selectedVehicleIds[farmId] = vehicleId
+    self:saveToXML()
+    print(("[%s] merchant vehicle for farm %s set to '%s'"):format(
+        GrainCollection.MOD_NAME, tostring(farmId), tostring(vehicleId)))
+    return true
+end
+
+-- Returns the persisted vehicle id for the farm, defaulting to
+-- Dispatch.DEFAULT_VEHICLE_ID ("small") when none stored — that's the
+-- v0.6-compatibility path: pre-v0.7 saves have no entry and read as
+-- "small", so the Lizard spawns exactly as it did before.
+function GrainCollection:getSelectedVehicleId(farmId)
+    local id = GrainCollection.selectedVehicleIds[farmId]
+    if id ~= nil and Dispatch ~= nil and Dispatch.getFleetEntry ~= nil
+            and Dispatch:getFleetEntry(id) ~= nil then
+        return id
+    end
+    return (Dispatch and Dispatch.DEFAULT_VEHICLE_ID) or "small"
+end
+
 function GrainCollection:getSaveXMLPath()
     if g_currentMission.missionInfo == nil then return nil end
     local savegameDir = g_currentMission.missionInfo.savegameDirectory
@@ -1501,6 +1561,13 @@ function GrainCollection:saveToXML()
         setXMLFloat(xml,  key .. "#totalNet",             b.totalNet)
         setXMLString(xml, key .. "#unloadingStationName", b.unloadingStationName or "")
         setXMLString(xml, key .. "#targetMonthLabel",     b.targetMonthLabel or "")
+        -- v0.7 CP3: only write vehicleId if the booking actually
+        -- captured one (new bookings always do; old saves may not).
+        -- An absent attribute on load → nil → defaulted to "small" at
+        -- fulfilment, which is the v0.6-era behaviour for old bookings.
+        if b.vehicleId ~= nil then
+            setXMLString(xml, key .. "#vehicleId", b.vehicleId)
+        end
     end
 
     -- v0.5.99.30: per-farm merchant-truck pickup locations.
@@ -1522,6 +1589,18 @@ function GrainCollection:saveToXML()
         setXMLInt(xml, key .. "#farmId",   farmId)
         setXMLInt(xml, key .. "#markerId", markerId)
         mi = mi + 1
+    end
+
+    -- v0.7: per-farm merchant vehicle choice (small / medium / large).
+    -- Only farms that explicitly picked a tier are written; unset farms
+    -- read back as Dispatch.DEFAULT_VEHICLE_ID at load, preserving v0.6
+    -- behaviour for old saves.
+    local vi = 0
+    for farmId, vehicleId in pairs(GrainCollection.selectedVehicleIds or {}) do
+        local key = string.format("grainCollection.selectedVehicle(%d)", vi)
+        setXMLInt(xml,    key .. "#farmId",    farmId)
+        setXMLString(xml, key .. "#vehicleId", tostring(vehicleId))
+        vi = vi + 1
     end
 
     saveXMLFile(xml)
@@ -1551,6 +1630,12 @@ function GrainCollection:loadFromXML()
             totalNet             = getXMLFloat(xml,  key .. "#totalNet"),
             unloadingStationName = getXMLString(xml, key .. "#unloadingStationName") or "",
             targetMonthLabel     = getXMLString(xml, key .. "#targetMonthLabel") or "",
+            -- v0.7 CP3: vehicleId may be absent on pre-v0.7 saves.
+            -- nil flows through Dispatch:startCollectionForBooking
+            -- which coerces it to "small" — keeping old bookings on
+            -- the Lizard rather than picking up whatever the player
+            -- has since selected globally.
+            vehicleId            = getXMLString(xml, key .. "#vehicleId"),
         })
         i = i + 1
     end
@@ -1585,6 +1670,24 @@ function GrainCollection:loadFromXML()
             GrainCollection.merchantMarkers[farmId] = markerId
         end
         mi = mi + 1
+    end
+
+    -- v0.7: per-farm merchant vehicle choice. Missing block in old
+    -- savegames → empty map → getSelectedVehicleId returns the default
+    -- so v0.6 saves keep spawning the Lizard. Unknown ids (renamed /
+    -- removed tier in a future build) are also coerced to the default
+    -- at read time by getSelectedVehicleId's getFleetEntry check.
+    GrainCollection.selectedVehicleIds = {}
+    local vi = 0
+    while true do
+        local key = string.format("grainCollection.selectedVehicle(%d)", vi)
+        if not hasXMLProperty(xml, key) then break end
+        local farmId    = getXMLInt(xml,    key .. "#farmId")
+        local vehicleId = getXMLString(xml, key .. "#vehicleId")
+        if farmId ~= nil and vehicleId ~= nil and vehicleId ~= "" then
+            GrainCollection.selectedVehicleIds[farmId] = vehicleId
+        end
+        vi = vi + 1
     end
 
     delete(xml)

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="108">
     <author>Chris Mason (Hartwell Farm)</author>
-    <version>0.6.0.0</version>
+    <version>0.7.0.0</version>
     <title>
         <en>Produce Collection Service</en>
     </title>
@@ -14,13 +14,20 @@ One booking system, two presentations:
 
 WITHOUT AutoDrive: the booking goes in a list and settles instantly on the due in-game day. Money lands in your bank minus a 5% haulage fee, "Collection complete" banner fires.
 
-WITH AutoDrive (optional soft dependency): at fulfilment, a merchant truck spawns at your chosen AutoDrive marker, drives to the silo, loads, drives to the best-paying buyer, despawns. Same fee, same payout, same banner. Multi-trip for large bookings.
+WITH AutoDrive (optional soft dependency): at fulfilment, a merchant vehicle spawns at your chosen AutoDrive marker, drives to the silo, loads, drives to the best-paying buyer, despawns. Same fee, same payout, same banner. Multi-trip for large bookings.
+
+You pick the merchant vehicle. A Vehicle button on the Produce Collection menu (AutoDrive-only) opens a picker with three vanilla tiers:
+  - Small  — Lizard MultiPurpose (Extension), 7,600 L. Tight-yard friendly.
+  - Medium — Massey Ferguson 9S + Brantner Z 18051, 19,600 L.
+  - Large  — Volvo FH16 + Krampe SKS 30/1050, ~59,400 L. One trip for most bookings.
+
+The vehicle is captured at BOOK time — changing the picker later only affects new bookings; pending ones keep the vehicle they were booked with. Each booking's vehicle is shown in the View Bookings list. Without AutoDrive there is no truck and the picker is hidden.
 
 The dialog tags whichever option pays more as RECOMMENDED — Book Now if today's price beats the forecast, Book Best Price Month if the seasonal peak is higher. The price you actually get is the buyer's real price on the day the sale settles, not the booking-time estimate.
 
 Booked grain is reserved in the menu so you can't double-book it. The View Bookings dialog lets you see and cancel pending bookings, which releases the reservation.
 
-Vehicle in AutoDrive mode is the vanilla Lizard MultiPurpose (Extension cargo, ~7,600 L). Vehicle selection (small / large / tractor + trailer combo) is planned for v0.7.
+Medium and large rigs are longer than the Lizard — give them turning room on the AutoDrive route and open clearance at the merchant arrival marker.
         ]]></en>
     </description>
 
@@ -33,6 +40,7 @@ Vehicle in AutoDrive mode is the vanilla Lizard MultiPurpose (Extension cargo, ~
         <sourceFile filename="scripts/gui/BookActionDialog.lua"/>
         <sourceFile filename="scripts/gui/ProduceBookingsDialog.lua"/>
         <sourceFile filename="scripts/gui/PendingBookingsDialog.lua"/>
+        <sourceFile filename="scripts/gui/VehiclePickerDialog.lua"/>
         <sourceFile filename="scripts/Dispatch.lua"/>
     </extraSourceFiles>
 

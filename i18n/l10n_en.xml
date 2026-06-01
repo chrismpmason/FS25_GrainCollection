@@ -42,6 +42,15 @@
         <text name="ui_cancel_selected_booking"   text="Cancel selected"/>
         <text name="ui_merchant_point"            text="Merchant point"/>
 
+        <!-- v0.7 vehicle picker. ui_vehicle is provided by vanilla
+             FS25 i18n (defining it here causes a duplicate warning,
+             same pattern as ui_balance / button_back / ui_total above).
+             The XML reference $l10n_ui_vehicle falls back to vanilla. -->
+        <text name="ui_vehicle_fmt"               text="Vehicle: %s"/>
+        <text name="ui_vehicle_picker_title"      text="Select merchant vehicle"/>
+        <text name="ui_vehicle_select"            text="Select"/>
+        <text name="ui_vehicle_booked_fmt"        text="  ·  Vehicle: %s"/>
+
         <!-- Notifications -->
         <text name="notify_booked"    text="Booked: %s for collection in %s. Estimated payout: %s (final price set on collection day)."/>
         <text name="notify_banner"    text="Collection complete: %s %s sold for %s"/>

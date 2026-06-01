@@ -222,6 +222,31 @@ function InGameMenuProduceCollection:updateViewBookingsLabel()
         self.merchantPointButton:setText(
             g_i18n:getText("ui_merchant_point") .. ": " .. name)
     end
+
+    -- v0.7: vehicle button label + AD-gating. Hidden when AutoDrive
+    -- isn't loaded — without AD the instant payout path doesn't spawn
+    -- any vehicle, so the selection is moot.
+    if self.vehicleButton ~= nil then
+        local adReady = (GrainCollection.adAvailable == true)
+        self.vehicleButton:setVisible(adReady)
+        if adReady then
+            local id, displayName = nil, "?"
+            if GrainCollection.getSelectedVehicleId ~= nil then
+                id = GrainCollection:getSelectedVehicleId(farmId)
+            end
+            if Dispatch ~= nil and Dispatch.getFleetEntry ~= nil then
+                local entry = Dispatch:getFleetEntry(id)
+                if entry == nil and Dispatch.DEFAULT_VEHICLE_ID ~= nil then
+                    entry = Dispatch:getFleetEntry(Dispatch.DEFAULT_VEHICLE_ID)
+                end
+                if entry ~= nil then
+                    displayName = tostring(entry.displayName or entry.id or "?")
+                end
+            end
+            self.vehicleButton:setText(
+                string.format(g_i18n:getText("ui_vehicle_fmt"), displayName))
+        end
+    end
 end
 
 -- ============================================================
@@ -484,6 +509,13 @@ function InGameMenuProduceCollection:onClickMerchantPoint(button)
     self:openMerchantMarkerPicker()
 end
 
+-- v0.7: vehicle selector button. Opens the picker dialog, lets the
+-- player change the default merchant truck. Only affects NEW bookings
+-- (existing bookings carry their captured vehicleId — see CP3a).
+function InGameMenuProduceCollection:onClickVehicle(button)
+    self:openVehiclePickerDialog()
+end
+
 -- Open the pending-bookings list. pcall-guarded so a GUI failure
 -- won't crash the menu. Returns true if the dialog opened.
 function InGameMenuProduceCollection:openPendingBookingsDialog()
@@ -541,6 +573,47 @@ function InGameMenuProduceCollection:openMerchantMarkerPicker()
     if dialog.target ~= nil and dialog.target.setMarkers ~= nil then
         dialog.target:setMarkers(markers, farmId, function()
             self:reloadFromBackend()
+        end)
+    end
+    return true
+end
+
+-- v0.7: open the vehicle picker. Builds the entry list from
+-- Dispatch.FLEET in fixed order (small → medium → large) so the
+-- list ordering stays stable regardless of Lua table iteration.
+-- pcall-guarded — a GUI failure must not crash the menu.
+function InGameMenuProduceCollection:openVehiclePickerDialog()
+    if GrainCollection.vehiclePickerDialog == nil or g_gui == nil then
+        print(("[%s] ERROR: VehiclePickerDialog not registered"):format(
+            GrainCollection.MOD_NAME))
+        return false
+    end
+    if Dispatch == nil or Dispatch.FLEET == nil then
+        print(("[%s] ERROR: Dispatch.FLEET unavailable"):format(
+            GrainCollection.MOD_NAME))
+        return false
+    end
+    local farmId = (g_currentMission and g_currentMission.getFarmId)
+        and g_currentMission:getFarmId() or 1
+
+    local entries = {}
+    for _, id in ipairs({ "small", "medium", "large" }) do
+        local e = Dispatch:getFleetEntry(id)
+        if e ~= nil then table.insert(entries, e) end
+    end
+
+    local ok, dialog = pcall(g_gui.showDialog, g_gui, "VehiclePickerDialog")
+    if not ok or dialog == nil then
+        print(("[%s] ERROR: showDialog('VehiclePickerDialog') failed: %s"):format(
+            GrainCollection.MOD_NAME, tostring(dialog)))
+        return false
+    end
+    if dialog.target ~= nil and dialog.target.setFleet ~= nil then
+        local frame = self
+        dialog.target:setFleet(entries, farmId, function(picked)
+            -- Selection persisted by the dialog. Refresh the header
+            -- label so it reflects the new pick immediately.
+            frame:updateViewBookingsLabel()
         end)
     end
     return true

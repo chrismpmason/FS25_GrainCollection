@@ -17,13 +17,20 @@
         </functions>
         <image>$data/vehicles/volvo/fh16/store_fh16.dds</image>
         <bundleElements>
+            <!-- v0.7: bare "data/..." prefix (not "$data/..."). The
+                 dispatcher (Dispatch:loadBundleConfig) reads this file
+                 directly and feeds each xmlFilename to
+                 VehicleLoadingData:setFilename, which looks up the
+                 storeManager key in its substituted form. The "$data/"
+                 prefix is only resolved when a file is loaded via a
+                 registered <storeItem>, which this bundle is NOT. -->
             <bundleElement>
-                <xmlFilename>$data/vehicles/volvo/fh16/fh16.xml</xmlFilename>
+                <xmlFilename>data/vehicles/volvo/fh16/fh16.xml</xmlFilename>
                 <offset>0 0 0</offset>
                 <rotationOffset>0 0 0</rotationOffset>
             </bundleElement>
             <bundleElement>
-                <xmlFilename>$data/vehicles/krampe/sks30_150/sks30_150.xml</xmlFilename>
+                <xmlFilename>data/vehicles/krampe/sks30_150/sks30_150.xml</xmlFilename>
                 <offset>0 0 -10</offset>
                 <rotationOffset>0 0 0</rotationOffset>
             </bundleElement>
