@@ -1,25 +1,31 @@
 # FS25_GrainCollection
 
-A small Farming Simulator 25 mod that lets you book grain collections from your on-farm silos straight from the in-game menu. Click BOOK on a grain row, pick *Book Now* or *Book Best Price Month*, and the mod handles the rest. A 5% haulage fee comes off the sale price (same as the buyer-truck system the in-game economy already models).
+A small Farming Simulator 25 mod that lets you book **produce collections** from your on-farm silos and cow husbandries straight from the in-game menu. Click BOOK on a row, pick *Book Now* or *Book Best Price Month*, and the mod handles the rest. A 5% haulage fee comes off the sale price (same as the buyer-truck system the in-game economy already models).
 
-Works on its own — no other mods required. If you also have **AutoDrive** installed and a waypoint network drawn, the mod adds a visual layer on top: a merchant truck physically drives from your set arrival point to the silo to the best-paying buyer, multi-trip if needed. With AutoDrive you also choose which **merchant vehicle** does the run — a small rigid truck, a mid-size tractor + grain trailer, or a full semi rig (see *Choosing a merchant vehicle* below). The booking, the fee, the payout — all identical to the no-AutoDrive case. AutoDrive only changes what fulfilment *looks* like.
+Two product families ship today:
 
-> **⚠ Public beta (v0.7.0.0).** Tested on Calmsden on my own save and it behaves, but the second pair of eyes are yours. Please file anything odd via [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues) — small details welcome (game version, AutoDrive version if used, map, what you did, what you saw).
+- **Grain** from on-farm silos — every sellable bulk fill type your silos hold (wheat, barley, canola, sunflowers, oat, sorghum…). Settled either instantly or, when AutoDrive is present, by a merchant truck driving silo → buyer.
+- **Milk** from cow husbandries — pooled across every milking shed on your farm. Milk accumulates as your cows produce; the mod doesn't auto-sell it, so it pools until you book a collection. **Phase 1 settles milk instantly** (no AutoDrive milk tanker yet — that's planned). Cow milk only this release; buffalo / goat milk are a small config addition once they're proven.
+
+Works on its own — no other mods required. If you also have **AutoDrive** installed and a waypoint network drawn, the mod adds a visual layer on top of **grain** sales: a merchant truck physically drives from your set arrival point to the silo to the best-paying buyer, multi-trip if needed. With AutoDrive you also choose which **merchant vehicle** does the run — a small rigid truck, a mid-size tractor + grain trailer, or a full semi rig (see *Choosing a merchant vehicle* below). The booking, the fee, the payout — all identical to the no-AutoDrive case. AutoDrive only changes what grain fulfilment *looks* like; milk always settles instantly in this release.
+
+> **⚠ Public beta (v0.8.0.0).** Tested on Calmsden on my own save and it behaves, but the second pair of eyes are yours. Please file anything odd via [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues) — small details welcome (game version, AutoDrive version if used, map, what you did, what you saw).
 
 ## How it works
 
 One booking system, two presentations.
 
-When you click **BOOK** on a grain row, the same three-option dialog opens regardless of whether AutoDrive is installed:
+When you click **BOOK** on a row — grain or milk — the same three-option dialog opens regardless of whether AutoDrive is installed:
 
-- **Book Now** — collects this in-game month. The grain stays locked in the silo from now until the due day; you can't double-book it.
-- **Book Best Price Month** — schedules collection for the month the forecast says will pay best for that grain. Same grain reservation.
+- **Book Now** — collects this in-game month. The produce stays reserved in the menu from now until the due day; you can't double-book it.
+- **Book Best Price Month** — schedules collection for the month the forecast says will pay best for that produce. Same reservation. (Milk has a full seasonal forecast curve too, so this works on milk just like grain.)
 - **Cancel** — close the dialog.
 
 Either way, the booking goes into a list. On the due in-game day, the mod settles it:
 
-- **Without AutoDrive** — grain leaves the silo instantly, money lands in your bank minus the 5% haulage fee, a *Collection complete* banner fires.
-- **With AutoDrive ready** — a merchant truck spawns at your arrival point, drives to the silo, loads, drives to the best-paying buyer, despawns at the buyer. The fee, the payout, the banner are the same as the instant case. Settled at the truck's delivery, not at booking time.
+- **Grain, without AutoDrive** — grain leaves the silo instantly, money lands in your bank minus the 5% haulage fee, a *Collection complete* banner fires.
+- **Grain, with AutoDrive ready** — a merchant truck spawns at your arrival point, drives to the silo, loads, drives to the best-paying buyer, despawns at the buyer. The fee, the payout, the banner are the same as the instant case. Settled at the truck's delivery, not at booking time.
+- **Milk** — settles instantly from the husbandry's milk tank, regardless of AutoDrive. The 5% fee + banner are identical to the grain instant path. (A milk-tanker visual layer is planned for a later release.)
 
 The **[RECOMMENDED]** tag on the dialog highlights whichever of *Book Now* or *Book Best Price Month* pays the higher projected total. If today's price beats the forecast, *Book Now* gets the tag; if the forecast peak is higher, *Book Best Price Month* does.
 
@@ -34,13 +40,14 @@ Either path uses **today's actual buyer price at the moment of fulfilment** — 
 
 ## Using it
 
-Hit **F7** (or click the Produce Collection sidebar icon). You'll see a table of every grain you've got stored, with current and forecast prices.
+Hit **F7** (or click the Produce Collection sidebar icon). You'll see a table of every produce type you've got stored, with current and forecast prices — grain rows from your silos plus a single Milk row pooling every cow husbandry on the farm.
 
-- The **Volume** column shows what's currently bookable. Once a grain row is fully booked it reads `All booked (10,000 L)` and the BOOK button is inactive on that row until the booking settles or is cancelled.
+- The **Volume** column shows what's currently bookable. Once a row is fully booked it reads `All booked (10,000 L)` and the BOOK button is inactive on that row until the booking settles or is cancelled.
+- For milk, bookable = total milk across your cow husbandries minus any pending milk booking. Milk refills naturally as the cows produce, so the bookable number climbs back up between bookings.
 - Click any row's **BOOK** button to open the booking dialog. Pick *Book Now* or *Book Best Price Month*.
-- The **View Bookings (N)** button at the top right shows pending bookings; click it to see the list and cancel any you've changed your mind on. Cancelling releases the reservation immediately.
+- The **View Bookings (N)** button at the top right shows pending bookings (grain and milk in one list); click it to see them and cancel any you've changed your mind on. Cancelling releases the reservation immediately.
 
-That's the whole player loop. The rest is just whether you've got AutoDrive set up to make the delivery visible.
+That's the whole player loop. The rest is just whether you've got AutoDrive set up to make grain deliveries visible.
 
 ### AutoDrive setup (only if you want the truck experience)
 
@@ -90,7 +97,7 @@ Grain is transferred directly when the truck reaches the silo (and sold directly
 ## Compatibility
 
 - **AutoDrive** — soft dependency. With it installed and a waypoint network drawn, bookings settle via the truck. Without it (or without waypoints), bookings settle instantly. Same fee, same payout, same banner either way. Tested against the FS25 AutoDrive release current as of May 2026.
-- **Realistic Livestock**, **Red Tape**, other husbandry mods — no conflict. Husbandry mods touch animal placeables; this mod only touches grain silos (and, when present, the AutoDrive driving controller).
+- **Realistic Livestock**, **Red Tape**, other husbandry mods — no conflict. Husbandry mods change how animals are modelled (per-animal stats, breeding rules, mortality, etc.); this mod reads + drains two things on the placeable itself — grain silos (fill levels), and the husbandry's stock vanilla milk Storage. Realistic Livestock leaves that Storage untouched on this save — milk pools through the standard `spec_husbandry.storage` the vanilla cow barn uses — so the mod's milk read/drain works the same whether RL is loaded or not. (Plus the AutoDrive driving controller, when present, for the grain truck.)
 - **Other AutoDrive-using mods** (Courseplay, etc.) — should coexist. The merchant truck is a transient AI-spawned vehicle, not one of your fleet, so it doesn't compete with player AutoDrive routes.
 - **Multiplayer** — modDesc declares MP supported, but I've only tested singleplayer. Treat MP as alpha until someone runs a dedicated session.
 - **Map compatibility** — anywhere FS25 runs. AutoDrive mode is tested on Calmsden.
@@ -108,7 +115,7 @@ Grain is transferred directly when the truck reaches the silo (and sold directly
 [GitHub Issues](https://github.com/chrismpmason/FS25_GrainCollection/issues). Please include:
 
 - FS25 version
-- Mod version (currently 0.7.0.0)
+- Mod version (currently 0.8.0.0)
 - Whether AutoDrive is installed, and which version
 - Map
 - Other mods you have active

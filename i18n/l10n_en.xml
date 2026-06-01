@@ -10,7 +10,10 @@
         <text name="input_GRAINCOLLECTION_TOGGLE_MENU" text="Produce Collection"/>
 
         <!-- Main table column headers -->
-        <text name="ui_col_grain"     text="Grain"/>
+        <!-- v0.8: "Grain" → "Produce" since the menu now lists milk
+             alongside grain. l10n key stays ui_col_grain so existing
+             XML references resolve without renaming. -->
+        <text name="ui_col_grain"     text="Produce"/>
         <text name="ui_col_volume"    text="Volume"/>
         <text name="ui_col_current"   text="£/L"/>
         <text name="ui_col_value"     text="Value"/>
@@ -29,7 +32,7 @@
 
         <!-- Book action dialog -->
         <text name="ui_book_dialog_title"   text="Book %s collection"/>
-        <text name="ui_book_dialog_context" text="%s across %d silo(s)  ·  Best buyer: %s @ £%.2f/L"/>
+        <text name="ui_book_dialog_context" text="%s across %d source(s)  ·  Best buyer: %s @ £%.2f/L"/>
         <text name="ui_book_now_fmt"          text="BOOK NOW — collected this month, ~%s"/>
         <text name="ui_book_best_fmt"         text="BOOK BEST — %s, ~%s"/>
         <text name="ui_book_recommended_tag"  text="   [RECOMMENDED]"/>

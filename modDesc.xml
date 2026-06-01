@@ -1,31 +1,36 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="108">
     <author>Chris Mason (Hartwell Farm)</author>
-    <version>0.7.0.0</version>
+    <version>0.8.0.0</version>
     <title>
         <en>Produce Collection Service</en>
     </title>
     <iconFilename>icon_grainCollection.dds</iconFilename>
     <description>
         <en><![CDATA[
-Book grain collections from your on-farm silos straight from the in-game menu. Press F7, find the grain you want sold, click BOOK. Pick Book Now or Book Best Price Month, and the mod handles the rest.
+Book produce collections from your on-farm silos AND cow husbandries straight from the in-game menu. Press F7, find what you want sold, click BOOK. Pick Book Now or Book Best Price Month, and the mod handles the rest.
 
-One booking system, two presentations:
+What you can book:
 
-WITHOUT AutoDrive: the booking goes in a list and settles instantly on the due in-game day. Money lands in your bank minus a 5% haulage fee, "Collection complete" banner fires.
+- GRAIN from your silos — every sellable bulk fill type your silos hold. Settled instantly, or visualised by an AutoDrive merchant truck when AutoDrive is installed.
+- MILK from your cow husbandries — pooled across every milking shed on the farm. Milk accumulates as cows produce (the mod doesn't auto-sell it), so it pools until you book a collection. Settled instantly on the due day, regardless of AutoDrive. Cow milk only this release.
 
-WITH AutoDrive (optional soft dependency): at fulfilment, a merchant vehicle spawns at your chosen AutoDrive marker, drives to the silo, loads, drives to the best-paying buyer, despawns. Same fee, same payout, same banner. Multi-trip for large bookings.
+One booking system, two presentations for grain:
 
-You pick the merchant vehicle. A Vehicle button on the Produce Collection menu (AutoDrive-only) opens a picker with three vanilla tiers:
+WITHOUT AutoDrive: the booking goes in a list and settles instantly on the due in-game day. Money lands in your bank minus a 5% haulage fee, "Collection complete" banner fires. Milk always takes this path in this release.
+
+WITH AutoDrive (optional soft dependency) for grain: at fulfilment, a merchant vehicle spawns at your chosen AutoDrive marker, drives to the silo, loads, drives to the best-paying buyer, despawns. Same fee, same payout, same banner. Multi-trip for large bookings. A milk-tanker visual layer is planned for a later release.
+
+You pick the merchant vehicle for grain runs. A Vehicle button on the Produce Collection menu (AutoDrive-only) opens a picker with three vanilla tiers:
   - Small  — Lizard MultiPurpose (Extension), 7,600 L. Tight-yard friendly.
   - Medium — Massey Ferguson 9S + Brantner Z 18051, 19,600 L.
   - Large  — Volvo FH16 + Krampe SKS 30/1050, ~59,400 L. One trip for most bookings.
 
 The vehicle is captured at BOOK time — changing the picker later only affects new bookings; pending ones keep the vehicle they were booked with. Each booking's vehicle is shown in the View Bookings list. Without AutoDrive there is no truck and the picker is hidden.
 
-The dialog tags whichever option pays more as RECOMMENDED — Book Now if today's price beats the forecast, Book Best Price Month if the seasonal peak is higher. The price you actually get is the buyer's real price on the day the sale settles, not the booking-time estimate.
+The dialog tags whichever option pays more as RECOMMENDED — Book Now if today's price beats the forecast, Book Best Price Month if the seasonal peak is higher. Both grain and milk have full seasonal price forecasts, so both options apply to both. The price you actually get is the buyer's real price on the day the sale settles, not the booking-time estimate.
 
-Booked grain is reserved in the menu so you can't double-book it. The View Bookings dialog lets you see and cancel pending bookings, which releases the reservation.
+Booked produce is reserved in the menu so you can't double-book it. The View Bookings dialog lets you see and cancel pending bookings (grain and milk in one list), which releases the reservation.
 
 Medium and large rigs are longer than the Lizard — give them turning room on the AutoDrive route and open clearance at the merchant arrival marker.
         ]]></en>
@@ -43,17 +48,6 @@ Medium and large rigs are longer than the Lizard — give them turning room on t
         <sourceFile filename="scripts/gui/VehiclePickerDialog.lua"/>
         <sourceFile filename="scripts/Dispatch.lua"/>
     </extraSourceFiles>
-
-    <!-- v0.6.x dev: merchant vehicle is the vanilla Lizard MultiPurpose
-         (extended) — fits universally on tight maps. The FH16+Krampe
-         bundle XML stays in vehicles/ but its <storeItem> registration
-         is removed; v0.7's vehicle-selection feature will re-register
-         it as one of the options. Don't strip the XML until then. -->
-    <!--
-    <storeItems>
-        <storeItem xmlFilename="vehicles/fh16KrampeBundle.xml"/>
-    </storeItems>
-    -->
 
     <l10n filenamePrefix="i18n/l10n"/>
 

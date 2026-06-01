@@ -107,7 +107,10 @@ end
 function InGameMenuProduceCollection:reloadFromBackend()
     local farmId = (g_currentMission and g_currentMission.getFarmId)
         and g_currentMission:getFarmId() or 1
-    self.rows = GrainCollection:getAggregatedProduce(farmId) or {}
+    -- v0.8 CP2: dispatch through PRODUCT_CONFIG so the menu draws
+    -- grain rows + the new milk row in one pass. getAggregatedProduce
+    -- (v0.7 grain-only) stays as the inner grain build.
+    self.rows = GrainCollection:getAggregatedProductRows(farmId) or {}
 
     -- v0.4.4 scrollbar verification: pad with duplicates if enabled.
     if InGameMenuProduceCollection.DEBUG_PAD_ROWS and #self.rows > 0 then
@@ -409,7 +412,7 @@ function InGameMenuProduceCollection:onListItemClicked(list, section, index)
         if g_currentMission and g_currentMission.addIngameNotification then
             g_currentMission:addIngameNotification(
                 FSBaseMission.INGAME_NOTIFICATION_INFO,
-                "All of this grain is already booked — cancel the booking first")
+                "All of this is already booked — cancel the booking first")
         end
         return
     end

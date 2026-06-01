@@ -316,6 +316,109 @@ function GrainCollection:getAggregatedProduce(farmId)
     return out
 end
 
+-- v0.8 CP2: milk row for the Produce Collection menu. One row that
+-- pools every milking shed on the farm. Reuses the same buyer scan
+-- (getSellPointsForFillType) and forecast helper (getMaxMeanAndMonth)
+-- the grain aggregator uses, so £/L / best buyer / max £/L / best
+-- month all light up via the existing fillType-agnostic code paths.
+-- Tagged productId="milk" so the menu's click handler can gate the
+-- booking flow per-product (CP3 wires the milk booking path).
+function GrainCollection:buildMilkRow(farmId)
+    if g_fillTypeManager == nil then return nil end
+    local MILK_INDEX = g_fillTypeManager:getFillTypeIndexByName("MILK")
+    if MILK_INDEX == nil then return nil end
+    local fillType = g_fillTypeManager:getFillTypeByIndex(MILK_INDEX)
+
+    local sheds  = self:findMilkingHusbandries(farmId, MILK_INDEX)
+    local pooled = self:sumMilkLitres(farmId, MILK_INDEX)
+
+    -- Reservation: CP3 will write milk bookings into the same bookings
+    -- table grain uses, so getReservedLitresByFillType already returns
+    -- the right number for MILK once those bookings exist. At CP2 it's
+    -- 0 because no booking path writes milk yet.
+    local reserved    = self:getReservedLitresByFillType(farmId)
+    local resForMilk  = reserved[MILK_INDEX] or 0
+    local bookable    = math.max(0, pooled - resForMilk)
+
+    -- Mirror grain's row-inclusion rule: show the row when the player
+    -- has anything at stake (milk in a shed OR a pending booking).
+    if pooled < GrainCollection.MIN_LOAD_LITRES and resForMilk <= 0 then
+        return nil
+    end
+
+    -- Best buyer + price scan, reused from the grain aggregator shape.
+    local sellPoints     = self:getSellPointsForFillType(MILK_INDEX) or {}
+    local bestPrice      = 0
+    local bestStation    = ""
+    local bestStationRef = nil
+    local bestPriceScale = 1.0
+    local priceTrend     = 0
+    local greatDemand    = false
+    for _, sp in ipairs(sellPoints) do
+        if sp.pricePerLitre and sp.pricePerLitre > bestPrice then
+            bestPrice      = sp.pricePerLitre
+            bestStation    = sp.name or ""
+            bestStationRef = sp.station
+            bestPriceScale = self:getStationPriceScale(sp.station)
+            if sp.station and sp.station.getCurrentPricingTrend then
+                local okT, t = pcall(sp.station.getCurrentPricingTrend,
+                    sp.station, MILK_INDEX)
+                if okT and t then priceTrend = t end
+            end
+            if sp.station and sp.station.greatDemandFillType == MILK_INDEX then
+                greatDemand = true
+            end
+        end
+    end
+
+    local maxPrice, meanPrice, bestPeriod = self:getMaxMeanAndMonth(fillType)
+
+    return {
+        fillTypeIndex      = MILK_INDEX,
+        fillTypeTitle      = (fillType and fillType.title) or "Milk",
+        hudOverlayFilename = fillType and fillType.hudOverlayFilename or nil,
+        totalLitres        = bookable,
+        siloLitres         = pooled,
+        totalReserved      = resForMilk,
+        siloCount          = #sheds,
+        sellPoints         = sellPoints,
+
+        bestBuyerName      = bestStation,
+        bestBuyerStation   = bestStationRef,
+        bestBuyerPrice     = bestPrice,
+        bestPriceScale     = bestPriceScale,
+        priceTrend         = priceTrend,
+        greatDemand        = greatDemand,
+
+        maxPricePerLitre   = maxPrice,
+        meanPricePerLitre  = meanPrice,
+        bestPeriod         = bestPeriod,
+        bestPeriodLabel    = self:formatTargetMonth(bestPeriod),
+
+        hasSellPoint       = (#sellPoints > 0 and bestPrice > 0),
+        bookable           = bookable >= GrainCollection.MIN_LOAD_LITRES,
+
+        productId          = "milk",   -- product tag for the click gate
+    }
+end
+
+-- v0.8 CP2: PRODUCT_CONFIG-aware row build for the menu. Concatenates
+-- grain rows (v0.7 silo path, unchanged) + the single milk row from
+-- buildMilkRow. Future products plug in here as new entries in
+-- PRODUCT_CONFIG with their own builder. Returns the same row shape
+-- the menu already consumes.
+function GrainCollection:getAggregatedProductRows(farmId)
+    local out = self:getAggregatedProduce(farmId) or {}
+    -- Grain rows lack productId; tag them so the menu's click handler
+    -- doesn't have to special-case absence-as-grain.
+    for _, r in ipairs(out) do
+        if r.productId == nil then r.productId = "grain" end
+    end
+    local milkRow = self:buildMilkRow(farmId)
+    if milkRow ~= nil then table.insert(out, milkRow) end
+    return out
+end
+
 -- Module-level state: list of pending bookings.
 GrainCollection.bookings = {}
 GrainCollection.nextId = 1
@@ -1058,10 +1161,6 @@ function GrainCollection:resolveMoneyTypes()
         default = MoneyType.SOLD_PRODUCTS,
     }
     GrainCollection.moneyTypeCache = cache
-    for _, k in ipairs({"harvest", "milk", "wool", "eggs", "wood", "default"}) do
-        print(("[%s] MoneyType.%-7s -> %s"):format(
-            GrainCollection.MOD_NAME, k, tostring(cache[k])))
-    end
 end
 
 function GrainCollection:getMoneyTypeForFillType(fillTypeIndex)
@@ -1217,6 +1316,17 @@ function GrainCollection:bookCollection(farmId, aggregate, sellPoint, leadDays, 
         capturedVehicleId = GrainCollection:getSelectedVehicleId(farmId)
     end
 
+    -- v0.8 CP3: tag the booking with its product + sourceKind so the
+    -- settle path can dispatch through PRODUCT_CONFIG (grain → silo
+    -- drain, milk → husbandry drain via removeMilk). Aggregate rows
+    -- from getAggregatedProductRows already carry productId; default
+    -- to "grain" for any caller that doesn't (which preserves v0.7
+    -- bookings exactly). sourceKind comes from PRODUCT_CONFIG so it
+    -- always agrees with the adapter wiring.
+    local productId = aggregate.productId or "grain"
+    local cfg       = self:getProductConfig(productId)
+    local sourceKind = (cfg and cfg.sourceKind) or "silo"
+
     local booking = {
         id                   = GrainCollection.nextId,
         farmId               = farmId,
@@ -1228,12 +1338,16 @@ function GrainCollection:bookCollection(farmId, aggregate, sellPoint, leadDays, 
         unloadingStationName = sellPoint.name,
         targetMonthLabel     = monthLabel or "",
         vehicleId            = capturedVehicleId,
+        productId            = productId,
+        sourceKind           = sourceKind,
     }
     GrainCollection.nextId = GrainCollection.nextId + 1
     table.insert(GrainCollection.bookings, booking)
 
-    print(("[%s] booked: id=%d dueDay=%d (today=%d, lead=%d, %s) litres=%d -> %s net=£%d"):format(
-        GrainCollection.MOD_NAME, booking.id, dueDay, env.currentDay, leadDays,
+    print(("[%s] booked: id=%d product=%s/%s dueDay=%d (today=%d, lead=%d, %s) litres=%d -> %s net=£%d"):format(
+        GrainCollection.MOD_NAME, booking.id,
+        tostring(booking.productId), tostring(booking.sourceKind),
+        dueDay, env.currentDay, leadDays,
         booking.targetMonthLabel,
         math.floor(booking.litres), tostring(booking.unloadingStationName),
         math.floor(booking.totalNet)))
@@ -1337,6 +1451,16 @@ function GrainCollection:processCollection(booking)
     print(("[%s] processCollection: id=%d fillType=%d booked=%d -> %s"):format(
         GrainCollection.MOD_NAME, booking.id, booking.fillTypeIndex,
         math.floor(booking.litres or 0), tostring(booking.unloadingStationName)))
+
+    -- v0.8 CP4: PRODUCT_CONFIG dispatch on booking.sourceKind. Milk
+    -- (and any future husbandry-based product) drains from the
+    -- husbandry pool and settles instantly via the shared payout
+    -- helper — no AutoDrive branch in Phase 1 (milk tanker is
+    -- Phase 2). Silo bookings fall through to the original v0.7
+    -- enumeration + drain + AD path below, exactly as before.
+    if booking.sourceKind == "husbandry" then
+        return self:settleHusbandryBooking(booking)
+    end
 
     -- Aggregated bookings rescan and drain across all silos holding the
     -- fill type, in discovery order, until booking.litres is satisfied.
@@ -1466,6 +1590,75 @@ function GrainCollection:processCollection(booking)
         booking.fillTypeIndex, booking.farmId, booking.unloadingStationName)
 end
 
+-- v0.8 CP4: husbandry sourceKind settle path. Mirrors the silo
+-- branch's structure (live price re-query → drain → soft settle
+-- on actual removed) but pulls from the husbandry pool via
+-- removeMilk instead of iterating individual storages, and skips
+-- the AutoDrive branch entirely (no milk-tanker in Phase 1).
+-- Caller is processCollection; returning nil tells hourChanged to
+-- remove the booking — matches grain semantics where bookings
+-- that can't settle (not enough produce on the day) are cancelled
+-- rather than retried, so a milk pool that drained between book
+-- and settle yields a cancelled-notification + drop, not a stuck
+-- pending booking.
+function GrainCollection:settleHusbandryBooking(booking)
+    -- Live-price re-query — same station lookup the silo path uses.
+    local livePrice = nil
+    if booking.unloadingStationName ~= nil and booking.unloadingStationName ~= ""
+            and g_currentMission ~= nil and g_currentMission.storageSystem ~= nil
+            and g_currentMission.storageSystem.getUnloadingStations ~= nil then
+        for _, station in pairs(g_currentMission.storageSystem:getUnloadingStations()) do
+            if stationName(station) == booking.unloadingStationName
+                    and station.acceptedFillTypes
+                    and station.acceptedFillTypes[booking.fillTypeIndex]
+                    and station.getEffectiveFillTypePrice ~= nil then
+                local ok, p = pcall(station.getEffectiveFillTypePrice,
+                    station, booking.fillTypeIndex)
+                if ok and p and p > 0 then
+                    livePrice = p
+                    break
+                end
+            end
+        end
+    end
+    local effectivePrice = livePrice or booking.pricePerLitre or 0
+    print(("[%s]   pricing: estimate=£%.3f/L live=%s effective=£%.3f/L"):format(
+        GrainCollection.MOD_NAME,
+        booking.pricePerLitre or 0,
+        livePrice and string.format("£%.3f/L", livePrice) or "n/a",
+        effectivePrice))
+
+    -- Drain from the husbandry pool. removeMilk caps at each shed's
+    -- current level and returns actual litres removed (≤ requested) —
+    -- the soft-settle behaviour matches grain when silos drained.
+    local removed = self:removeMilk(booking.farmId, booking.litres,
+        booking.fillTypeIndex)
+
+    if removed < GrainCollection.MIN_LOAD_LITRES then
+        print(("[%s]   FAILED: not enough milk at collection time (%.1fL removed across milking sheds for booking %d)"):format(
+            GrainCollection.MOD_NAME, removed, booking.id))
+        if g_currentMission ~= nil and g_currentMission.addIngameNotification ~= nil then
+            g_currentMission:addIngameNotification(
+                FSBaseMission.INGAME_NOTIFICATION_INFO,
+                "Milk collection cancelled — not enough milk in sheds")
+        end
+        return
+    end
+
+    -- Dispatch verification log: lets us confirm the husbandry branch
+    -- ran (not the silo branch) for this booking, and that the actual
+    -- drained amount matches what we're about to charge for.
+    print(("[%s] [collection] COMPLETE id=%d product=%s/%s sourceKind=%s removed=%.1f -> %s"):format(
+        GrainCollection.MOD_NAME, booking.id,
+        tostring(booking.productId), tostring(booking.sourceKind),
+        tostring(booking.sourceKind),
+        removed, tostring(booking.unloadingStationName)))
+
+    -- Shared payout — same 5% fee, addMoney + banner as grain's path.
+    self:settleBookingPayout(removed, effectivePrice,
+        booking.fillTypeIndex, booking.farmId, booking.unloadingStationName)
+end
+
 -- ============================================================
 -- Save / Load
 -- ============================================================
@@ -1568,6 +1761,15 @@ function GrainCollection:saveToXML()
         if b.vehicleId ~= nil then
             setXMLString(xml, key .. "#vehicleId", b.vehicleId)
         end
+        -- v0.8 CP3: product tagging. Only write when not the default
+        -- "grain"/"silo" pair so v0.7 saves stay byte-identical until
+        -- the player books a non-grain product.
+        if b.productId ~= nil and b.productId ~= "grain" then
+            setXMLString(xml, key .. "#productId", b.productId)
+        end
+        if b.sourceKind ~= nil and b.sourceKind ~= "silo" then
+            setXMLString(xml, key .. "#sourceKind", b.sourceKind)
+        end
     end
 
     -- v0.5.99.30: per-farm merchant-truck pickup locations.
@@ -1636,6 +1838,11 @@ function GrainCollection:loadFromXML()
             -- the Lizard rather than picking up whatever the player
             -- has since selected globally.
             vehicleId            = getXMLString(xml, key .. "#vehicleId"),
+            -- v0.8 CP3: productId / sourceKind absent on pre-v0.8
+            -- saves → default to grain/silo so the v0.7 grain settle
+            -- path runs exactly as before for old bookings.
+            productId            = getXMLString(xml, key .. "#productId")   or "grain",
+            sourceKind           = getXMLString(xml, key .. "#sourceKind")  or "silo",
         })
         i = i + 1
     end
@@ -1691,6 +1898,232 @@ function GrainCollection:loadFromXML()
     end
 
     delete(xml)
+end
+
+-- ============================================================
+-- v0.8: PRODUCT_CONFIG + cow-milk adapter (husbandry sourceKind)
+-- ============================================================
+-- Multi-product foundation. Two entries today: grain (existing v0.7
+-- silo path, untouched) and milk (new husbandry path). The
+-- PRODUCT_CONFIG table documents the wiring; v0.8 CP2+ will dispatch
+-- the menu / booking / settle through it. Adding a future product
+-- (buffalo milk, honey, cheese...) is a new entry here plus
+-- whatever sourceKind adapter it needs.
+
+local function gcReadStorageLevel(storage, fillTypeIndex)
+    if type(storage) ~= "table" then return nil end
+    if type(storage.getFillLevel) == "function" then
+        local ok, v = pcall(storage.getFillLevel, storage, fillTypeIndex)
+        if ok and type(v) == "number" then return v end
+    end
+    if type(storage.getFillLevels) == "function" then
+        local ok, t = pcall(storage.getFillLevels, storage)
+        if ok and type(t) == "table" then return t[fillTypeIndex] or 0 end
+    end
+    if type(storage.fillLevels) == "table" then
+        return storage.fillLevels[fillTypeIndex] or 0
+    end
+    return nil
+end
+
+local function gcReadStorageCapacity(storage, fillTypeIndex)
+    if type(storage) ~= "table" then return nil end
+    if type(storage.getCapacity) == "function" then
+        local ok, c = pcall(storage.getCapacity, storage, fillTypeIndex)
+        if ok and type(c) == "number" then return c end
+    end
+    if type(storage.capacities) == "table" then
+        return storage.capacities[fillTypeIndex]
+    end
+    return nil
+end
+
+local function gcWriteStorageLevel(storage, target, fillTypeIndex)
+    if type(storage) ~= "table" then return false, "not a table" end
+    if type(storage.setFillLevel) == "function" then
+        local ok, err = pcall(storage.setFillLevel, storage, target, fillTypeIndex)
+        if ok then return true, "setFillLevel" end
+        return false, "setFillLevel ERR: " .. tostring(err)
+    end
+    return false, "no setFillLevel on storage"
+end
+
+-- Returns the list of Storage tables on a spec, regardless of whether
+-- they live under `.storages` (typical) or `.storage` (singular form
+-- seen on some specs). Empty list if neither.
+local function gcSpecStorageList(spec)
+    if type(spec) ~= "table" then return {} end
+    if type(spec.storages) == "table" then return spec.storages end
+    if type(spec.storage)  == "table" then return { spec.storage } end
+    return {}
+end
+
+-- Multi-path placeable discovery, matching getOwnedSilos' triple-fallback.
+-- placeableSystem.placeables is the raw field that works on this save;
+-- .getPlaceables is nil here, so the function reference is left as a
+-- second-chance probe in case a different save exposes it.
+local function gcDiscoverPlaceables()
+    local pset = {}
+    local function absorb(list)
+        if type(list) ~= "table" then return end
+        for _, item in pairs(list) do
+            if type(item) == "table" then pset[item] = true end
+        end
+    end
+    if g_currentMission == nil then return pset end
+    local ps = g_currentMission.placeableSystem
+    if type(ps) == "table" then
+        if type(ps.placeables) == "table" then absorb(ps.placeables) end
+        if type(ps.getPlaceables) == "function" then
+            local ok, list = pcall(function() return ps:getPlaceables() end)
+            if ok then absorb(list) end
+        end
+    end
+    local ss = g_currentMission.storageSystem
+    if type(ss) == "table" and type(ss.getStorages) == "function" then
+        local ok, storages = pcall(function() return ss:getStorages() end)
+        if ok and type(storages) == "table" then
+            for _, st in pairs(storages) do
+                if type(st) == "table" and type(st.owningPlaceable) == "table" then
+                    pset[st.owningPlaceable] = true
+                end
+            end
+        end
+    end
+    return pset
+end
+
+-- husbandry sourceKind adapter. Returns one entry per (placeable,
+-- MILK-supporting Storage with capacity > 0) on the given farm.
+-- Capacity > 0 excludes calving boxes / dry-cow pens whose specs
+-- declare MILK in supportedFillTypes but with cap=0.
+function GrainCollection:findMilkingHusbandries(farmId, fillTypeIndex)
+    if fillTypeIndex == nil and g_fillTypeManager ~= nil then
+        fillTypeIndex = g_fillTypeManager:getFillTypeIndexByName("MILK")
+    end
+    local results = {}
+    if fillTypeIndex == nil then return results end
+
+    for p, _ in pairs(gcDiscoverPlaceables()) do
+        local owner = 0
+        if type(p.getOwnerFarmId) == "function" then
+            local ok, fid = pcall(p.getOwnerFarmId, p)
+            if ok and fid ~= nil then owner = fid end
+        end
+        if owner == farmId then
+            for k, _ in pairs(p) do
+                if type(k) == "string" and k:sub(1, 5) == "spec_" then
+                    local spec = p[k]
+                    for sIdx, st in pairs(gcSpecStorageList(spec)) do
+                        if type(st) == "table"
+                                and type(st.getSupportedFillTypes) == "function" then
+                            local okS, sft = pcall(st.getSupportedFillTypes, st)
+                            if okS and type(sft) == "table" and sft[fillTypeIndex] then
+                                local cap = gcReadStorageCapacity(st, fillTypeIndex) or 0
+                                if cap > 0 then
+                                    table.insert(results, {
+                                        placeable  = p,
+                                        specKey    = k,
+                                        spec       = spec,
+                                        storageKey = string.format("%s[%s]", k, tostring(sIdx)),
+                                        storage    = st,
+                                        capacity   = cap,
+                                    })
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return results
+end
+
+-- Sum MILK across every milking shed on the farm. Defaults to MILK
+-- fillType; takes fillTypeIndex so BUFFALOMILK can reuse the same
+-- adapter later (Phase 2).
+function GrainCollection:sumMilkLitres(farmId, fillTypeIndex)
+    if fillTypeIndex == nil and g_fillTypeManager ~= nil then
+        fillTypeIndex = g_fillTypeManager:getFillTypeIndexByName("MILK")
+    end
+    if fillTypeIndex == nil then return 0 end
+    local total = 0
+    for _, e in ipairs(self:findMilkingHusbandries(farmId, fillTypeIndex)) do
+        total = total + (gcReadStorageLevel(e.storage, fillTypeIndex) or 0)
+    end
+    return total
+end
+
+-- Drain `litres` of MILK from the farm's milking sheds, in discovery
+-- order, taking up to each shed's current level. Returns the litres
+-- actually removed (may be < requested if the pool is short of it).
+-- Used by Phase 1 settle; the same drain works for buffalo milk later.
+function GrainCollection:removeMilk(farmId, litres, fillTypeIndex)
+    if fillTypeIndex == nil and g_fillTypeManager ~= nil then
+        fillTypeIndex = g_fillTypeManager:getFillTypeIndexByName("MILK")
+    end
+    if fillTypeIndex == nil or litres == nil or litres <= 0 then return 0 end
+
+    local remaining = litres
+    local drained   = 0
+    for _, e in ipairs(self:findMilkingHusbandries(farmId, fillTypeIndex)) do
+        if remaining <= 0 then break end
+        local lvl  = gcReadStorageLevel(e.storage, fillTypeIndex) or 0
+        local take = math.min(lvl, remaining)
+        if take > 0 then
+            local target = lvl - take
+            local ok, mode = gcWriteStorageLevel(e.storage, target, fillTypeIndex)
+            if ok then
+                drained   = drained + take
+                remaining = remaining - take
+            else
+                print(("[%s] milk drain write FAILED on %s: %s"):format(
+                    GrainCollection.MOD_NAME, e.storageKey, tostring(mode)))
+            end
+        end
+    end
+    return drained
+end
+
+-- Per-product config. CP1 declares the contract; the menu / booking
+-- / settle paths will start dispatching through it in CP2+. Grain's
+-- entry delegates to the existing v0.7 functions so its behaviour is
+-- unchanged at CP1 (no callsites consume the grain entry yet).
+GrainCollection.PRODUCT_CONFIG = {
+    {
+        id          = "grain",
+        sourceKind  = "silo",
+        -- Grain is multi-fillType (WHEAT, BARLEY, CANOLA, ...) — the
+        -- caller already iterates the sellable fillTypes. Adapter
+        -- delegates to existing v0.7 silo enumeration.
+        listSources = function(farmId, fillTypeIndex)
+            return GrainCollection:getOwnedSilos(farmId, fillTypeIndex)
+        end,
+        hasForecast = true,
+    },
+    {
+        id           = "milk",
+        sourceKind   = "husbandry",
+        fillTypeName = "MILK",
+        listSources    = function(farmId, fillTypeIndex)
+            return GrainCollection:findMilkingHusbandries(farmId, fillTypeIndex)
+        end,
+        readPooled     = function(farmId, fillTypeIndex)
+            return GrainCollection:sumMilkLitres(farmId, fillTypeIndex)
+        end,
+        removeFromPool = function(farmId, litres, fillTypeIndex)
+            return GrainCollection:removeMilk(farmId, litres, fillTypeIndex)
+        end,
+        hasForecast = true,
+    },
+}
+
+function GrainCollection:getProductConfig(id)
+    for _, p in ipairs(GrainCollection.PRODUCT_CONFIG) do
+        if p.id == id then return p end
+    end
+    return nil
 end
 
 -- ============================================================
