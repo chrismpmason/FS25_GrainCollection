@@ -26,6 +26,22 @@
                 position="40px -200px"
                 text=""
                 onClick="onClickBookBest"/>
+        <!-- v0.10: bale count stepper. Hidden unless the row is a bale
+             row; sits in the gap between BOOK BEST and Cancel so the
+             grain / husbandry layout is untouched. -->
+        <Button profile="gc_dialogButtonSmall" id="btnCountMinus10"
+                position="40px -250px" text="-10" onClick="onClickCountMinus10"/>
+        <Button profile="gc_dialogButtonSmall" id="btnCountMinus1"
+                position="115px -250px" text="-1" onClick="onClickCountMinus1"/>
+        <Text profile="gc_bookCountText" id="countText"
+              position="190px -250px" text=""/>
+        <Button profile="gc_dialogButtonSmall" id="btnCountPlus1"
+                position="415px -250px" text="+1" onClick="onClickCountPlus1"/>
+        <Button profile="gc_dialogButtonSmall" id="btnCountPlus10"
+                position="490px -250px" text="+10" onClick="onClickCountPlus10"/>
+        <Button profile="gc_dialogButtonSmall" id="btnCountAll"
+                position="565px -250px" text="" onClick="onClickCountAll"/>
+
         <Button profile="gc_dialogButtonCancel" id="btnCancel"
                 position="40px -290px"
                 text=""

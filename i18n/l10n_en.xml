@@ -37,6 +37,15 @@
         <text name="ui_book_best_fmt"         text="BOOK BEST — %s, ~%s"/>
         <text name="ui_book_recommended_tag"  text="   [RECOMMENDED]"/>
 
+        <!-- v0.10 bales: booked and shown by count -->
+        <text name="ui_bales_fmt"             text="%d bales"/>
+        <text name="ui_bales_booked_fmt"      text="%d bales (%d booked)"/>
+        <text name="ui_bales_all_booked_fmt"  text="All booked (%d bales)"/>
+        <text name="ui_bales_litres_fmt"      text="%d bales (%s)"/>
+        <text name="ui_bale_count_fmt"        text="Sell %d of %d bales"/>
+        <text name="ui_book_bale_context"     text="%d bales (%s L) across %d shed(s)  ·  Best buyer: %s @ £%.2f/L"/>
+        <text name="ui_gc_all"                text="All"/>
+
         <!-- Bookings dialogs -->
         <text name="ui_bookings_title"            text="Pending bookings"/>
         <text name="ui_no_bookings"               text="No pending bookings."/>

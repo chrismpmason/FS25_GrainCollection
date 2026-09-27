@@ -278,7 +278,17 @@ function InGameMenuProduceCollection:populateCellForItemInSection(list, section,
         local volText
         local reservedL = row.totalReserved or 0
         local availableL = row.totalLitres or 0
-        if reservedL > 0 and availableL == 0 then
+        if row.productId == "bale" then
+            -- Bales headline as a count; litres live in the book dialog.
+            local avail, res = row.baleAvailable or 0, row.baleReserved or 0
+            if res > 0 and avail == 0 then
+                volText = string.format(g_i18n:getText("ui_bales_all_booked_fmt"), res)
+            elseif res > 0 then
+                volText = string.format(g_i18n:getText("ui_bales_booked_fmt"), avail, res)
+            else
+                volText = string.format(g_i18n:getText("ui_bales_fmt"), avail)
+            end
+        elseif reservedL > 0 and availableL == 0 then
             volText = string.format("All booked (%s)", formatLitres(reservedL))
         elseif reservedL > 0 then
             volText = string.format("%s (%s booked)",
@@ -444,8 +454,8 @@ function InGameMenuProduceCollection:openBookActionDialog(row)
     end
     if dialog.target ~= nil and dialog.target.setBookData ~= nil then
         local frame = self
-        dialog.target:setBookData(row, function(choice)
-            frame:onBookConfirmed(row, choice)
+        dialog.target:setBookData(row, function(choice, count)
+            frame:onBookConfirmed(row, choice, count)
         end)
     end
     return true
@@ -466,8 +476,16 @@ function InGameMenuProduceCollection:maybeNudgeAutoDriveSetup(farmId)
     InGameMenuProduceCollection.adNudgeShown = true
 end
 
-function InGameMenuProduceCollection:onBookConfirmed(row, choice)
+function InGameMenuProduceCollection:onBookConfirmed(row, choice, count)
     if choice ~= "now" and choice ~= "best" then return end
+    -- Bale rows carry the count picked in the dialog. Copy the row so the
+    -- pick doesn't linger on the cached row for the next booking.
+    if row.productId == "bale" then
+        local picked = {}
+        for k, v in pairs(row) do picked[k] = v end
+        picked.bookCount = count
+        row = picked
+    end
     local farmId = (g_currentMission and g_currentMission.getFarmId)
         and g_currentMission:getFarmId() or 1
     local leadDays = 0

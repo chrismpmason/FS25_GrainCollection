@@ -190,6 +190,20 @@
         <imageSelectedColor value="0.45 0.45 0.45 0.95"/>
     </Profile>
 
+    <!-- v0.10: bale count stepper (-10 / -1 / count / +1 / +10 / All). -->
+    <Profile name="gc_dialogButtonSmall" extends="gc_dialogButtonWide">
+        <size value="70px 34px"/>
+        <textSize value="16px"/>
+    </Profile>
+    <Profile name="gc_bookCountText" extends="baseReference" with="anchorTopLeft">
+        <size value="220px 34px"/>
+        <textSize value="17px"/>
+        <textBold value="true"/>
+        <textColor value="$preset_gc_colorWhite"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
     <!-- v0.4.3: empty-state text centered in the modal body. The vanilla
          ingameMenuNoContentText profile anchors bottom-left in this
          context and overlapped the button strip. -->

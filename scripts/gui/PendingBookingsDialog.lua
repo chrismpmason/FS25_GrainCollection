@@ -114,7 +114,11 @@ function PendingBookingsDialog:populateCellForItemInSection(list, section, index
 
     local ft = g_fillTypeManager and g_fillTypeManager:getFillTypeByIndex(b.fillTypeIndex)
     local grainName = (ft and ft.title) or "?"
-    local title = string.format("%s — %s", grainName, formatLitres(b.litres))
+    local amount = formatLitres(b.litres)
+    if b.sourceKind == "bale" and b.count ~= nil then
+        amount = string.format(g_i18n:getText("ui_bales_litres_fmt"), b.count, amount)
+    end
+    local title = string.format("%s — %s", grainName, amount)
 
     if cell:getAttribute("title") ~= nil then
         cell:getAttribute("title"):setText(title)

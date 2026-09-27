@@ -32,6 +32,12 @@ function GrainCollectionEvent:writeStream(streamId, connection)
         streamWriteFloat32(streamId, self.booking.totalNet)
         streamWriteString(streamId, self.booking.unloadingStationName or "")
         streamWriteString(streamId, self.booking.targetMonthLabel or "")
+        -- Product tagging drives the server's settle dispatch; without it a
+        -- client's husbandry or bale booking would settle as grain. count
+        -- is the bale count, -1 when the booking isn't a bale booking.
+        streamWriteString(streamId, self.booking.productId or "grain")
+        streamWriteString(streamId, self.booking.sourceKind or "silo")
+        streamWriteInt32(streamId, self.booking.count or -1)
     elseif self.action == "cancel" then
         streamWriteInt32(streamId, self.booking.id)
     end
@@ -50,7 +56,11 @@ function GrainCollectionEvent:readStream(streamId, connection)
             totalNet             = streamReadFloat32(streamId),
             unloadingStationName = streamReadString(streamId),
             targetMonthLabel     = streamReadString(streamId),
+            productId            = streamReadString(streamId),
+            sourceKind           = streamReadString(streamId),
         }
+        local count = streamReadInt32(streamId)
+        if count >= 0 then self.booking.count = count end
     elseif self.action == "cancel" then
         self.booking = { id = streamReadInt32(streamId) }
     end
